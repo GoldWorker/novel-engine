@@ -1,8 +1,12 @@
 # novel-engine API (0.1.0)
 
+[English](api.md) | [中文文档](api.zh-CN.md)
+
 Stable surface for host apps. Import from `novel-engine` unless noted. The published package only ships `dist/`, `README.md`, and `LICENSE`.
 
 This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, real LLM providers, Arbiter full scenes, or ChapterAdvanceGate review UI. `src/` never imports `node:fs` / `node:path`.
+
+Copy-pasteable host examples: [`examples/`](../examples/) ([中文说明](../examples/README.zh-CN.md)).
 
 ## Package entries
 
@@ -37,6 +41,8 @@ Same-thread host:
 const engine = createEngine({ store, llm });
 await engine.run({ prompt: "写一本三章短篇：……" });
 ```
+
+Full short / layered mocks: [`examples/short-book.ts`](../examples/short-book.ts) and [`examples/layered-book.ts`](../examples/layered-book.ts).
 
 ## `route` and domain
 
@@ -80,6 +86,8 @@ Hosts implement `LlmPort` against a gateway or WebLLM. This package never ships 
 
 `MemoryStore` and `OpfsStore` implement `list()` so snapshot export includes every file. Custom adapters may omit `list`; export then probes the known book layout.
 
+OPFS example: [`examples/opfs-store.ts`](../examples/opfs-store.ts).
+
 ## Book snapshot
 
 | Export | Kind | Notes |
@@ -98,6 +106,8 @@ Zip is built with [fflate](https://github.com/101arrowz/fflate) (browser build).
 const bytes = await exportBookSnapshot(store);
 await importBookSnapshot(otherStore, bytes);
 ```
+
+Round-trip example: [`examples/snapshot-roundtrip.ts`](../examples/snapshot-roundtrip.ts).
 
 ## Mock LLM
 
@@ -130,6 +140,8 @@ From `novel-engine/worker`:
 | `createEngine`, stores, `MockLlm`, snapshot helpers | re-exports | So the worker bundle does not import the main-thread client. |
 
 Commands: `start`, `steer`, `pause`, `resume`, `snapshot`. Notices: `event`, `snapshot`, `error`.
+
+Embed example: [`examples/engine.worker.ts`](../examples/engine.worker.ts) + [`examples/worker-host.ts`](../examples/worker-host.ts).
 
 ## Advanced store helpers
 
