@@ -1,0 +1,50 @@
+{
+  "name": "novel-engine",
+  "version": "0.0.1",
+  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Phase 0: domain + deterministic flow.route.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "novel",
+    "engine",
+    "sdk",
+    "typescript",
+    "esm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GoldWorker/novel-engine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GoldWorker/novel-engine/issues"
+  },
+  "homepage": "https://github.com/GoldWorker/novel-engine#readme",
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
