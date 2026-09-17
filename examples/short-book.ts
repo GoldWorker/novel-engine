@@ -1,4 +1,7 @@
 /**
+ * Scenario 1 — short book to complete.
+ * 场景 1：短篇完结。Root README: Usage by scenario / 使用场景.
+ *
  * Short-book host example — `createEngine` + `MemoryStore` + `MockLlm` to `phase=complete`.
  * 短篇宿主示例：脚本化 MockLlm 跑完整本（无真实模型、无 UI）。
  *

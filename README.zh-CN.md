@@ -10,7 +10,9 @@
 
 路由模型受 [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli)（`internal/flow/router.go`、`internal/host/engine.go`）启发。
 
-稳定导出见 [docs/api.zh-CN.md](docs/api.zh-CN.md)（[English API](docs/api.md)）。可复制的完整示例见 [`examples/`](examples/)（[中文说明](examples/README.zh-CN.md)）。
+稳定导出见 [docs/api.zh-CN.md](docs/api.zh-CN.md)（[English API](docs/api.md)）。
+
+**怎么用？** 先看 [使用场景](#使用场景) — [短篇完结](#scenario-short-book) · [分层中长篇](#scenario-layered-book) · [浏览器持久化](#scenario-opfs) · [Web Worker](#scenario-worker) · [书稿快照](#scenario-snapshot)。可跑通的源码在 [`examples/`](examples/)。
 
 ## 不包含什么
 
@@ -31,9 +33,9 @@
                        ▼
 ┌─────────────────────────────────────────────┐
 │  Dedicated Worker（`novel-engine/worker`）  │
-│   StorePort（OpfsStore | MemoryStore）      │
-│   LlmPort（由宿主注入）                      │
-│   Engine.run → route(state) → Worker 工具   │
+│  StorePort（OpfsStore | MemoryStore）       │
+│  LlmPort（由宿主注入）                       │
+│  Engine.run → route(state) → Worker 工具    │
 └─────────────────────────────────────────────┘
 ```
 
@@ -56,81 +58,158 @@ npm install novel-engine
 
 发布的 `files`：`dist/`、`README.md`、`LICENSE`。
 
-## 快速开始（Mock 短篇）
+## 使用场景
 
-完整可复制版本：[examples/short-book.ts](examples/short-book.ts)（含把三章跑到 `complete` 的 `MockLlm.fromHandler`）。
+本节是宿主的「怎么用」入口。每一行对应一类真实任务：先复制片段，再打开链接里的 `examples/*.ts` 看完整可跑文件（handler、合并规则、协议）。`examples/` 是文档，不进入 `npm test`。仓库内可跑通的 mock 路径：`npm run test:short` 与 `npm run test:layered`。
 
-```ts
-import { createEngine, MemoryStore, MockLlm } from "novel-engine";
+场景可以组合：Worker 示例已经调用 `createOpfsStore()`；快照导入导出适用于任意 `StorePort`。
 
-const store = new MemoryStore();
-const llm = new MockLlm([
-  // 每次 complete() 消耗脚本里的一步。真实宿主请优先返回 toolCalls。
-  { text: "done" },
-]);
-
-const engine = createEngine({ store, llm, maxSteps: 40 });
-const result = await engine.run({ prompt: "写一本三章短篇：灯塔看守人捡到一封没有寄信人的信。" });
-// result.stoppedReason === "complete" | "idle" | "paused" | "max_steps"
-```
-
-要把整本书跑完，请用 `MockLlm.fromHandler`（Worker 工具会把结果写回对话；`audit_foundation` 必须复用 `novel_context` 给出的 `fingerprint`）。`ReplayLlm` 只按固定 `{ text, toolCalls? }[]` 回放，不读取请求内容。
+| 场景 | 什么时候用 | 规范源码 |
+| --- | --- | --- |
+| [1. 短篇完结](#scenario-short-book) | 同线程把三章非分层短篇 mock 跑到 `phase=complete`。默认 `plan_start` 路径（`architect_short` + `MemoryStore` + `MockLlm`）。 | [`examples/short-book.ts`](examples/short-book.ts) |
+| [2. 分层中长篇](#scenario-layered-book) | 卷/弧大纲，弧末审阅 → 摘要 → `expand_next_arc`，然后 `complete_book`。提示词关键词选出 `architect_long`。 | [`examples/layered-book.ts`](examples/layered-book.ts) |
+| [3. 浏览器持久化（OPFS）](#scenario-opfs) | 用 Origin Private File System 让产物在刷新后还在；没有 OPFS 时回落到临时的 `MemoryStore`。 | [`examples/opfs-store.ts`](examples/opfs-store.ts) |
+| [4. 嵌入 Web Worker](#scenario-worker) | 专用 Worker + 主线程 client：`start` / `steer` / `pause` / `resume` / `snapshot`。 | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
+| [5. 书稿快照导入导出](#scenario-snapshot) | 把 store 中每个路径打成 zip（fflate），再 merge 进另一个 `StorePort`。 | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 
 `plan_start` 是**确定性桩**（无 Arbiter LLM）：提示词含 `长篇` 则选 `architect_long` / `long`；含 `中篇` 或 `分层` 则选 `architect_long` / `mid`；否则 `architect_short` / `short`。Worker 失败会重试一次，然后暂停。同一条 Route 指令连续五次也会暂停（死锁上限）。
 
-仓库内受支持的短篇 mock 路径：
+目录索引（不再重复怎么用）：[`examples/README.zh-CN.md`](examples/README.zh-CN.md) · [English](examples/README.md)。
 
-```bash
-npm run test:short
+<a id="scenario-short-book"></a>
+
+### 1. 短篇完结
+
+**何时：** Node 测试或同线程宿主。要用脚本化的 `LlmPort` 填完基础设定、写满三章，并停在 `complete`。
+
+接线是 `createEngine` + `MemoryStore` + `MockLlm.fromHandler`。每次 `complete()` 都要返回 Worker 的 `toolCalls`；`audit_foundation` 必须复用 `novel_context` 给出的 `fingerprint`。`ReplayLlm` 只按固定 `{ text, toolCalls? }[]` 回放，不读取请求内容——列表不够长就会耗尽抛错。
+
+完整 handler（architect → writer → editor 直到 `phase=complete`）：[`examples/short-book.ts`](examples/short-book.ts)（`shortBookHandler`、`replayLlmSketch`、`runShortBook`）。仓库内：`npm run test:short` + `fixtures/short-book.json`。
+
+```ts
+import {
+  createEngine,
+  MemoryStore,
+  MockLlm,
+  ReplayLlm,
+  inferPlanningStub,
+} from "novel-engine";
+
+const prompt = "写一本三章短篇：灯塔看守人捡到一封没有寄信人的信。";
+const planning = inferPlanningStub(prompt);
+// planning.tier === "short", planning.planner === "architect_short"
+
+const store = new MemoryStore();
+const llm = MockLlm.fromHandler(shortBookHandler); // 从 examples/short-book.ts 复制
+const engine = createEngine({ store, llm, maxSteps: 20 });
+const result = await engine.run({ prompt });
+// result.stoppedReason === "complete" | "idle" | "paused" | "max_steps"
+
+// ReplayLlm 不读请求——列表必须覆盖每一次 complete()：
+const replay = new ReplayLlm([
+  {
+    text: "save book",
+    toolCalls: [
+      { id: "1", name: "save_book", arguments: { title: "无主的信", synopsis: "……" } },
+    ],
+  },
+]);
 ```
 
-## 分层 mock（中篇 / 长篇）
+<a id="scenario-layered-book"></a>
 
-完整可复制版本：[examples/layered-book.ts](examples/layered-book.ts)。
+### 2. 分层中长篇
 
-`architect_long` 工具：`save_foundation(type=layered_outline|append_volume|complete_book)`、`expand_next_arc`。编辑摘要：`save_review`（弧/全局）、`save_arc_summary`、`save_volume_summary`。`novel_context` 是章节摘要的滑动窗口，若已落盘则附带弧/卷摘要（没有四段压缩器）。
+**何时：** 中篇或长篇需要卷/弧结构，而不是扁平大纲。
 
-```bash
-npm run test:layered
-```
+注入方式与场景 1 相同（`createEngine` + `MemoryStore` + `MockLlm`）——只是提示词关键词和工具名不同。
+
+`architect_long` 工具：`save_foundation(type=layered_outline|append_volume|complete_book)`、`expand_next_arc`。编辑：`save_review`（弧/全局）、`save_arc_summary`、`save_volume_summary`。`novel_context` 是章节摘要的滑动窗口，若已落盘则附带弧/卷摘要（没有四段压缩器）。
 
 分层夹具是一卷 / 两弧。两章展开写完后，Route 碰到弧末：editor `save_review` → `save_arc_summary` → `expand_next_arc`。第二弧结束后写卷摘要，再 `complete_book`。
 
-宿主仍按短篇快速开始的方式注入 `MemoryStore` + `MockLlm`（或真实 `LlmPort`）——只是提示词关键词和工具名不同。
+完整 handler：[`examples/layered-book.ts`](examples/layered-book.ts)（`layeredBookHandler`、`runLayeredBook`）。仓库内：`npm run test:layered` + `fixtures/layered-book.json`。
 
-## 使用 OPFS 持久化
+```ts
+import { createEngine, MemoryStore, MockLlm, inferPlanningStub } from "novel-engine";
 
-完整可复制版本：[examples/opfs-store.ts](examples/opfs-store.ts)。
+const prompt =
+  "写一本分层中篇：一座海上灯塔里住着守塔人林守。一卷两弧，先写接灯，再写离岸归来。";
+const planning = inferPlanningStub(prompt);
+// planning.tier === "mid", planning.planner === "architect_long"
+// 提示词含 长篇 → { tier: "long", planner: "architect_long" }
+
+const engine = createEngine({
+  store: new MemoryStore(),
+  llm: MockLlm.fromHandler(layeredBookHandler), // 从 examples/layered-book.ts 复制
+  maxSteps: 40,
+});
+const result = await engine.run({ prompt });
+```
+
+<a id="scenario-opfs"></a>
+
+### 3. 浏览器持久化（OPFS）
+
+**何时：** 浏览器宿主必须在刷新后保住产物。Node、非安全上下文、较旧的浏览器没有 OPFS。
 
 `isOpfsAvailable()` 是能力探测（`navigator.storage.getDirectory`，测试里也可注入 fake）。
 
-`createOpfsStore()` 在 OPFS 存在时打开 `OpfsStore`；**否则返回 `MemoryStore`**。内存是临时的——刷新页面产物就没了。必须持久化的宿主应先检查能力（或调用 `OpfsStore.open()`，不可用时抛 `OpfsUnavailableError`）。
+`createOpfsStore()` 在 OPFS 存在时打开 `OpfsStore`；**否则返回 `MemoryStore`**。内存是临时的——刷新页面产物就没了。必须持久化的宿主应先检查能力（或调用 `OpfsStore.open()`，不可用时抛 `OpfsUnavailableError`），或传入 `{ fallbackToMemory: false }`。
+
+写入先写到同级临时文件再 `move`（或 copy-then-unlink），避免写到一半崩溃时截断旧产物。
+
+本库从不使用 `node:fs` / `node:path`。若需要 Node 文件系统适配器，请在包外实现 `StorePort`。
+
+完整装配（`openStoreWithFallback`、`openPersistedStore`、`openOrThrow`）：[`examples/opfs-store.ts`](examples/opfs-store.ts)。
 
 ```ts
 import {
   createOpfsStore,
   isOpfsAvailable,
+  MemoryStore,
   OpfsStore,
+  OpfsUnavailableError,
+  type StorePort,
 } from "novel-engine";
 
-if (!isOpfsAvailable()) {
-  // Node、非安全上下文、或较旧的浏览器。
-  // createOpfsStore() 会返回 MemoryStore，除非传入 { fallbackToMemory: false }。
+export async function openStoreWithFallback(): Promise<StorePort> {
+  if (!isOpfsAvailable()) {
+    // Node、非安全上下文、或较旧的浏览器。
+    return new MemoryStore();
+  }
+  return createOpfsStore(); // OpfsStore | MemoryStore
 }
 
-const store = await createOpfsStore(); // OpfsStore | MemoryStore
-const persisted = await OpfsStore.open(); // 子目录 "novel-engine"；不可用则抛错
+export async function openPersistedStore(): Promise<OpfsStore> {
+  try {
+    return await OpfsStore.open(); // 子目录 "novel-engine"
+  } catch (err) {
+    if (err instanceof OpfsUnavailableError) throw err; // 没有 OPFS
+    throw err;
+  }
+}
+
+export async function openOrThrow(): Promise<StorePort> {
+  return createOpfsStore({ fallbackToMemory: false });
+}
 ```
 
-写入先写到同级临时文件再 `move`（或 copy-then-unlink），避免写到一半崩溃时截断旧产物。
+<a id="scenario-worker"></a>
 
-## 嵌入 Web Worker
+### 4. 嵌入 Web Worker
 
-完整可复制版本：[examples/engine.worker.ts](examples/engine.worker.ts)（Worker 线程）+ [examples/worker-host.ts](examples/worker-host.ts)（主线程）。
+**何时：** Engine 循环不应卡住 UI 线程。把专用 Worker 模块和主线程 client 配对。
 
-Worker 包是**独立入口**，便于打包器把主线程 client 从 Worker 里 treeshake 掉（反之亦然）。
+Worker 包是**独立入口**，便于打包器把主线程 client 从 Worker 里 treeshake 掉（反之亦然）。Worker 文件由宿主持有：在此注入你的 `LlmPort`（本库不附带供应商客户端）。Worker 里也可以用 `MockLlm.fromHandler`——见场景 1。
 
-Worker 模块（由宿主持有；在此注入你的 `LlmPort`）：
+`pause` / `steer` 在**当前 Worker 指令结束之后**生效，不会打断正在执行的工具。`steer` 会记录一条决策并把 `flow=steering`，于是 `route` 返回 null，直到 `resume()` 恢复之前的 flow。
+
+协议（`ENGINE_PROTOCOL === 1`）：主线程发出 `start` / `steer` / `pause` / `resume` / `snapshot`；Worker 回 `event` / `snapshot` / `error`。事件 kind：`started` | `step` | `paused` | `resumed` | `steered` | `stopped`。
+
+完整配对：[`examples/engine.worker.ts`](examples/engine.worker.ts)（Worker）+ [`examples/worker-host.ts`](examples/worker-host.ts)（主线程）。请**两份一起**复制。
+
+Worker 模块：
 
 ```ts
 import { attachEngineWorker, createOpfsStore } from "novel-engine/worker";
@@ -146,7 +225,7 @@ const llm: LlmPort = {
 attachEngineWorker(self, {
   async createPorts() {
     const store = await createOpfsStore();
-    return { store, llm };
+    return { store, llm, maxSteps: 40 };
   },
 });
 ```
@@ -154,7 +233,7 @@ attachEngineWorker(self, {
 主线程：
 
 ```ts
-import { createEngineClient } from "novel-engine";
+import { createEngineClient, ENGINE_PROTOCOL } from "novel-engine";
 
 const worker = new Worker(new URL("./engine.worker.js", import.meta.url), {
   type: "module",
@@ -165,35 +244,57 @@ engine.onEvent((event) => {
   // event.kind: started | step | paused | resumed | steered | stopped
 });
 
-const result = await engine.start({ prompt: "写一本三章短篇：……" });
+const result = await engine.start({
+  prompt: "写一本三章短篇：灯塔看守人捡到一封没有寄信人的信。",
+  maxSteps: 40,
+});
 await engine.pause();
 await engine.steer("把结局改成和解");
 await engine.resume();
 const snap = await engine.snapshot();
+console.log(result.stoppedReason, snap.paused, snap.running, ENGINE_PROTOCOL);
+engine.close();
 ```
 
-`pause` / `steer` 在**当前 Worker 指令结束之后**生效，不会打断正在执行的工具。`steer` 会记录一条决策并把 `flow=steering`，于是 `route` 返回 null，直到 `resume()` 恢复之前的 flow。
+<a id="scenario-snapshot"></a>
 
-协议（`v: 1`）：主线程发出 `start` / `steer` / `pause` / `resume` / `snapshot`；Worker 回 `event` / `snapshot` / `error`。
+### 5. 书稿快照导入导出
 
-## 书籍快照导出 / 导入
+**何时：** 在 store 之间备份、转移或灌入书稿树（Memory ↔ OPFS，或自定义 `StorePort`）。
 
-完整可复制版本：[examples/snapshot-roundtrip.ts](examples/snapshot-roundtrip.ts)。
+用 fflate 把 store 中每个路径打成浏览器可用的 zip。还原是 merge：快照里的路径会被覆盖；目标里多出来的文件会留下。清单 `.novel-engine-snapshot.json` 只存在于 zip 内——不会写入 store。
 
-用 fflate 把 store 中每个路径打成浏览器可用的 zip。还原是 merge：快照里的路径会被覆盖；目标里多出来的文件会留下。
+`MemoryStore` / `OpfsStore` 实现了 `list()`，因此自定义的额外文件也会打进包。没有 `list` 的自定义 `StorePort` 仍会导出已知的书籍布局（`meta/`、`chapters/` 等）。匹配 `.*.tmp` 的临时文件会被跳过。非法 zip / 缺失或未知清单 / 路径逃逸会抛 `SnapshotError`。
+
+完整往返：[`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts)。
 
 ```ts
 import {
+  BOOK_SNAPSHOT_FORMAT,
+  BOOK_SNAPSHOT_VERSION,
   exportBookSnapshot,
   importBookSnapshot,
   MemoryStore,
+  SnapshotError,
 } from "novel-engine";
 
-const bytes = await exportBookSnapshot(store); // Uint8Array zip
-await importBookSnapshot(new MemoryStore(), bytes);
-```
+const source = new MemoryStore();
+await source.write("meta/note.txt", "keep-me-source");
+await source.write("chapters/01.md", "蜡封的瓶子");
 
-`MemoryStore` / `OpfsStore` 实现了 `list()`，因此自定义的额外文件也会打进包。没有 `list` 的自定义 `StorePort` 仍会导出已知的书籍布局（`meta/`、`chapters/` 等）。
+const bytes = await exportBookSnapshot(source); // Uint8Array zip（PK 魔数）
+
+const dest = new MemoryStore({ "extra/host.json": "{\"ok\":true}" });
+try {
+  await importBookSnapshot(dest, bytes); // merge
+} catch (err) {
+  if (err instanceof SnapshotError) throw err;
+  throw err;
+}
+// dest 里有快照的 chapters/01.md；extra/host.json 会留下
+// BOOK_SNAPSHOT_FORMAT === "novel-engine-book-snapshot"
+// BOOK_SNAPSHOT_VERSION === 1
+```
 
 ## `route` 如何决策
 
@@ -212,18 +313,6 @@ await importBookSnapshot(new MemoryStore(), bytes);
 11. 否则 → writer 下一章
 
 `null` 是合法返回：Engine 接着尝试 plan_start 桩，或停止（`complete` / `idle`）。
-
-## 示例一览
-
-| 文件 | 说明 |
-| --- | --- |
-| [examples/short-book.ts](examples/short-book.ts) | 短篇跑到完结（`MockLlm` / `ReplayLlm`） |
-| [examples/layered-book.ts](examples/layered-book.ts) | 分层中篇 `architect_long` |
-| [examples/opfs-store.ts](examples/opfs-store.ts) | OPFS 与 MemoryStore 回落 |
-| [examples/engine.worker.ts](examples/engine.worker.ts) + [worker-host.ts](examples/worker-host.ts) | Worker 嵌入与协议 |
-| [examples/snapshot-roundtrip.ts](examples/snapshot-roundtrip.ts) | 快照 zip 往返 |
-
-说明文档：[examples/README.zh-CN.md](examples/README.zh-CN.md) · [English](examples/README.md)
 
 ## 公开 API
 
@@ -259,6 +348,7 @@ npm run test:short
 npm run test:layered
 npm run typecheck
 npm run build
+npx tsc -p tsconfig.examples.json
 ```
 
 测试**只用 mock 夹具**——无网络、无供应商、无真实 OPFS。

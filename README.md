@@ -10,7 +10,9 @@ This package never talks to a real model and never uses `node:fs` / `node:path` 
 
 Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli) (`internal/flow/router.go`, `internal/host/engine.go`).
 
-Stable exports are listed in [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)). Copy-pasteable host examples live in [`examples/`](examples/) ([中文说明](examples/README.zh-CN.md)).
+Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)).
+
+**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot). Runnable sources stay in [`examples/`](examples/).
 
 ## What's not included
 
@@ -31,9 +33,9 @@ Stable exports are listed in [docs/api.md](docs/api.md) ([中文 API](docs/api.z
                        ▼
 ┌─────────────────────────────────────────────┐
 │  Dedicated Worker (`novel-engine/worker`)   │
-│   StorePort (OpfsStore | MemoryStore)       │
-│   LlmPort  (host-injected)                  │
-│   Engine.run → route(state) → Worker tools  │
+│  StorePort (OpfsStore | MemoryStore)        │
+│  LlmPort  (host-injected)                   │
+│  Engine.run → route(state) → Worker tools   │
 └─────────────────────────────────────────────┘
 ```
 
@@ -56,81 +58,158 @@ Package exports:
 
 Published `files`: `dist/`, `README.md`, `LICENSE`.
 
-## Quickstart (mock short book)
+## Usage by scenario
 
-Full copy-pasteable run (handler through `phase=complete`): [`examples/short-book.ts`](examples/short-book.ts).
+This section is the host how-to. Each row is a job you might actually run. Copy the snippet, then open the linked `examples/*.ts` for the full runnable file (handlers, merge rules, protocol). `examples/` is documentation — not part of `npm test`. Supported in-repo mock runs: `npm run test:short` and `npm run test:layered`.
 
-```ts
-import { createEngine, MemoryStore, MockLlm } from "novel-engine";
+Scenarios compose: the Worker example already calls `createOpfsStore()`; snapshot import/export works with any `StorePort`.
 
-const store = new MemoryStore();
-const llm = new MockLlm([
-  // Each complete() consumes one scripted step. Prefer toolCalls in real hosts.
-  { text: "done" },
-]);
-
-const engine = createEngine({ store, llm, maxSteps: 40 });
-const result = await engine.run({ prompt: "写一本三章短篇：灯塔看守人捡到一封没有寄信人的信。" });
-// result.stoppedReason === "complete" | "idle" | "paused" | "max_steps"
-```
-
-To finish a whole book, use `MockLlm.fromHandler` (Worker tools echo results back; `audit_foundation` must reuse the `fingerprint` from `novel_context`). `ReplayLlm` only replays a fixed `{ text, toolCalls? }[]` and does not inspect the request.
+| Scenario | When to use | Canonical source |
+| --- | --- | --- |
+| [1. Short book to complete](#scenario-short-book) | Same-thread mock of a 3-chapter non-layered book through `phase=complete`. Default `plan_start` path (`architect_short` + `MemoryStore` + `MockLlm`). | [`examples/short-book.ts`](examples/short-book.ts) |
+| [2. Layered mid / long book](#scenario-layered-book) | Volume/arc outline, arc-end review → summary → `expand_next_arc`, then `complete_book`. Prompt keywords pick `architect_long`. | [`examples/layered-book.ts`](examples/layered-book.ts) |
+| [3. Persist in the browser (OPFS)](#scenario-opfs) | Keep artifacts across reloads with Origin Private File System; fall back to ephemeral `MemoryStore` when OPFS is missing. | [`examples/opfs-store.ts`](examples/opfs-store.ts) |
+| [4. Embed in a Web Worker](#scenario-worker) | Dedicated worker + main-thread client: `start` / `steer` / `pause` / `resume` / `snapshot`. | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
+| [5. Book snapshot export / import](#scenario-snapshot) | Zip every store path (fflate) and merge-restore into another `StorePort`. | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
 
-The repo's short-book fixture is the supported mock path:
+Folder index (no extra how-to): [`examples/README.md`](examples/README.md) · [中文](examples/README.zh-CN.md).
 
-```bash
-npm run test:short
+<a id="scenario-short-book"></a>
+
+### 1. Short book to complete
+
+**When:** Node tests or a same-thread host. You want a scripted `LlmPort` to fill foundation, write three chapters, and stop at `complete`.
+
+Wiring is `createEngine` + `MemoryStore` + `MockLlm.fromHandler`. Each `complete()` must return Worker `toolCalls`; `audit_foundation` must reuse the `fingerprint` from `novel_context`. `ReplayLlm` only replays a fixed `{ text, toolCalls? }[]` and does not inspect the request — a short list throws when exhausted.
+
+Full handler (architect → writer → editor through `phase=complete`): [`examples/short-book.ts`](examples/short-book.ts) (`shortBookHandler`, `replayLlmSketch`, `runShortBook`). In-repo: `npm run test:short` + `fixtures/short-book.json`.
+
+```ts
+import {
+  createEngine,
+  MemoryStore,
+  MockLlm,
+  ReplayLlm,
+  inferPlanningStub,
+} from "novel-engine";
+
+const prompt = "写一本三章短篇：灯塔看守人捡到一封没有寄信人的信。";
+const planning = inferPlanningStub(prompt);
+// planning.tier === "short", planning.planner === "architect_short"
+
+const store = new MemoryStore();
+const llm = MockLlm.fromHandler(shortBookHandler); // copy from examples/short-book.ts
+const engine = createEngine({ store, llm, maxSteps: 20 });
+const result = await engine.run({ prompt });
+// result.stoppedReason === "complete" | "idle" | "paused" | "max_steps"
+
+// ReplayLlm does not read the request — the list must cover every complete():
+const replay = new ReplayLlm([
+  {
+    text: "save book",
+    toolCalls: [
+      { id: "1", name: "save_book", arguments: { title: "无主的信", synopsis: "……" } },
+    ],
+  },
+]);
 ```
 
-## Layered mock (mid / long)
+<a id="scenario-layered-book"></a>
 
-Full copy-pasteable run: [`examples/layered-book.ts`](examples/layered-book.ts).
+### 2. Layered mid / long book
 
-`architect_long` tools: `save_foundation(type=layered_outline|append_volume|complete_book)`, `expand_next_arc`. Editor summaries: `save_review` (arc/global), `save_arc_summary`, `save_volume_summary`. `novel_context` is a sliding window of chapter summaries plus arc/volume summaries when present (no four-stage compressor).
+**When:** Mid or long books that need volume/arc structure instead of a flat outline.
 
-```bash
-npm run test:layered
-```
+Same injection as scenario 1 (`createEngine` + `MemoryStore` + `MockLlm`) — only the prompt keywords and tool names change.
+
+`architect_long` tools: `save_foundation(type=layered_outline|append_volume|complete_book)`, `expand_next_arc`. Editor: `save_review` (arc/global), `save_arc_summary`, `save_volume_summary`. `novel_context` is a sliding window of chapter summaries plus arc/volume summaries when present (no four-stage compressor).
 
 The layered fixture is one volume / two arcs. After two expanded chapters, Route hits arc-end: editor `save_review` → `save_arc_summary` → `expand_next_arc`. After the second arc it writes a volume summary, then `complete_book`.
 
-A host still injects `MemoryStore` + `MockLlm` (or a real `LlmPort`) the same way as the short-book quickstart — only the prompt keywords and tool names change.
+Full handler: [`examples/layered-book.ts`](examples/layered-book.ts) (`layeredBookHandler`, `runLayeredBook`). In-repo: `npm run test:layered` + `fixtures/layered-book.json`.
 
-## Persist with OPFS
+```ts
+import { createEngine, MemoryStore, MockLlm, inferPlanningStub } from "novel-engine";
 
-Full copy-pasteable setup: [`examples/opfs-store.ts`](examples/opfs-store.ts).
+const prompt =
+  "写一本分层中篇：一座海上灯塔里住着守塔人林守。一卷两弧，先写接灯，再写离岸归来。";
+const planning = inferPlanningStub(prompt);
+// planning.tier === "mid", planning.planner === "architect_long"
+// Prompt with 长篇 → { tier: "long", planner: "architect_long" }
+
+const engine = createEngine({
+  store: new MemoryStore(),
+  llm: MockLlm.fromHandler(layeredBookHandler), // copy from examples/layered-book.ts
+  maxSteps: 40,
+});
+const result = await engine.run({ prompt });
+```
+
+<a id="scenario-opfs"></a>
+
+### 3. Persist in the browser (OPFS)
+
+**When:** A browser host must keep artifacts across reloads. Node, insecure contexts, and older browsers have no OPFS.
 
 `isOpfsAvailable()` is a capability check (`navigator.storage.getDirectory`, or an injected fake in tests).
 
-`createOpfsStore()` opens `OpfsStore` when OPFS exists; **otherwise it returns `MemoryStore`**. Memory is ephemeral — reload loses artifacts. Hosts that must persist should check the capability (or call `OpfsStore.open()`, which throws `OpfsUnavailableError`).
+`createOpfsStore()` opens `OpfsStore` when OPFS exists; **otherwise it returns `MemoryStore`**. Memory is ephemeral — reload loses artifacts. Hosts that must persist should check the capability (or call `OpfsStore.open()`, which throws `OpfsUnavailableError`), or pass `{ fallbackToMemory: false }`.
+
+Writes use a sibling temp file then `move` (or copy-then-unlink) so a crash mid-write does not truncate the previous artifact.
+
+This library never uses `node:fs` / `node:path`. Implement `StorePort` outside the package if you need a Node filesystem adapter.
+
+Full setup (`openStoreWithFallback`, `openPersistedStore`, `openOrThrow`): [`examples/opfs-store.ts`](examples/opfs-store.ts).
 
 ```ts
 import {
   createOpfsStore,
   isOpfsAvailable,
+  MemoryStore,
   OpfsStore,
+  OpfsUnavailableError,
+  type StorePort,
 } from "novel-engine";
 
-if (!isOpfsAvailable()) {
-  // Node, insecure context, older browser.
-  // createOpfsStore() returns MemoryStore unless { fallbackToMemory: false }.
+export async function openStoreWithFallback(): Promise<StorePort> {
+  if (!isOpfsAvailable()) {
+    // Node, insecure context, or older browser.
+    return new MemoryStore();
+  }
+  return createOpfsStore(); // OpfsStore | MemoryStore
 }
 
-const store = await createOpfsStore(); // OpfsStore | MemoryStore
-const persisted = await OpfsStore.open(); // subdirectory "novel-engine"; throws if unavailable
+export async function openPersistedStore(): Promise<OpfsStore> {
+  try {
+    return await OpfsStore.open(); // subdirectory "novel-engine"
+  } catch (err) {
+    if (err instanceof OpfsUnavailableError) throw err; // OPFS missing
+    throw err;
+  }
+}
+
+export async function openOrThrow(): Promise<StorePort> {
+  return createOpfsStore({ fallbackToMemory: false });
+}
 ```
 
-Writes use a sibling temp file then `move` (or copy-then-unlink) so a crash mid-write does not truncate the previous artifact.
+<a id="scenario-worker"></a>
 
-## Embed in a Web Worker
+### 4. Embed in a Web Worker
 
-Full copy-pasteable pair: [`examples/engine.worker.ts`](examples/engine.worker.ts) (worker thread) + [`examples/worker-host.ts`](examples/worker-host.ts) (main thread).
+**When:** The Engine loop should not block the UI thread. Pair a dedicated worker module with a main-thread client.
 
-The worker bundle is a **separate entry** so bundlers can tree-shake the main-thread client out of the worker (and vice versa).
+The worker bundle is a **separate entry** so bundlers can tree-shake the main-thread client out of the worker (and vice versa). Host-owned worker file: inject your `LlmPort` there (this library never ships a provider client). `MockLlm.fromHandler` also works inside the worker — see scenario 1.
 
-Worker module (host-owned file; inject your `LlmPort`):
+`pause` / `steer` take effect **after the current Worker instruction**, not mid-tool. `steer` records a decision and sets `flow=steering` so `route` returns null until `resume()` restores the previous flow.
+
+Protocol (`ENGINE_PROTOCOL === 1`): main → worker `start` / `steer` / `pause` / `resume` / `snapshot`; worker → main `event` / `snapshot` / `error`. Event kinds: `started` | `step` | `paused` | `resumed` | `steered` | `stopped`.
+
+Full pair: [`examples/engine.worker.ts`](examples/engine.worker.ts) (worker) + [`examples/worker-host.ts`](examples/worker-host.ts) (main). Copy **both**.
+
+Worker module:
 
 ```ts
 import { attachEngineWorker, createOpfsStore } from "novel-engine/worker";
@@ -146,7 +225,7 @@ const llm: LlmPort = {
 attachEngineWorker(self, {
   async createPorts() {
     const store = await createOpfsStore();
-    return { store, llm };
+    return { store, llm, maxSteps: 40 };
   },
 });
 ```
@@ -154,7 +233,7 @@ attachEngineWorker(self, {
 Main thread:
 
 ```ts
-import { createEngineClient } from "novel-engine";
+import { createEngineClient, ENGINE_PROTOCOL } from "novel-engine";
 
 const worker = new Worker(new URL("./engine.worker.js", import.meta.url), {
   type: "module",
@@ -165,35 +244,57 @@ engine.onEvent((event) => {
   // event.kind: started | step | paused | resumed | steered | stopped
 });
 
-const result = await engine.start({ prompt: "写一本三章短篇：……" });
+const result = await engine.start({
+  prompt: "写一本三章短篇：灯塔看守人捡到一封没有寄信人的信。",
+  maxSteps: 40,
+});
 await engine.pause();
 await engine.steer("把结局改成和解");
 await engine.resume();
 const snap = await engine.snapshot();
+console.log(result.stoppedReason, snap.paused, snap.running, ENGINE_PROTOCOL);
+engine.close();
 ```
 
-`pause` / `steer` take effect **after the current Worker instruction**, not mid-tool. `steer` records a decision and sets `flow=steering` so `route` returns null until `resume()` restores the previous flow.
+<a id="scenario-snapshot"></a>
 
-Protocol (`v: 1`): `start` / `steer` / `pause` / `resume` / `snapshot` from main; `event` / `snapshot` / `error` from the worker.
+### 5. Book snapshot export / import
 
-## Book snapshot export / import
+**When:** Backup, transfer, or hydrate a book tree between stores (Memory ↔ OPFS, or a custom `StorePort`).
 
-Full copy-pasteable round-trip: [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts).
+Browser-safe zip of every store path (fflate). Restore is a merge: snapshot paths are overwritten; extra files already in the destination stay. Manifest `.novel-engine-snapshot.json` lives inside the zip only — it is not written to the store.
 
-Browser-safe zip of every store path (fflate). Restore is a merge: snapshot paths are overwritten; extra files already in the destination stay.
+`MemoryStore` / `OpfsStore` implement `list()`, so custom extra files are included. Custom `StorePort` adapters without `list` still export the known book layout (`meta/`, `chapters/`, …). Temp files matching `.*.tmp` are skipped. Invalid zip / missing or unknown manifest / path escape throws `SnapshotError`.
+
+Full round-trip: [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts).
 
 ```ts
 import {
+  BOOK_SNAPSHOT_FORMAT,
+  BOOK_SNAPSHOT_VERSION,
   exportBookSnapshot,
   importBookSnapshot,
   MemoryStore,
+  SnapshotError,
 } from "novel-engine";
 
-const bytes = await exportBookSnapshot(store); // Uint8Array zip
-await importBookSnapshot(new MemoryStore(), bytes);
-```
+const source = new MemoryStore();
+await source.write("meta/note.txt", "keep-me-source");
+await source.write("chapters/01.md", "蜡封的瓶子");
 
-`MemoryStore` / `OpfsStore` implement `list()`, so custom extra files are included. Custom `StorePort` adapters without `list` still export the known book layout (`meta/`, `chapters/`, …).
+const bytes = await exportBookSnapshot(source); // Uint8Array zip (PK magic)
+
+const dest = new MemoryStore({ "extra/host.json": "{\"ok\":true}" });
+try {
+  await importBookSnapshot(dest, bytes); // merge
+} catch (err) {
+  if (err instanceof SnapshotError) throw err;
+  throw err;
+}
+// dest has chapters/01.md from the snapshot; extra/host.json is kept
+// BOOK_SNAPSHOT_FORMAT === "novel-engine-book-snapshot"
+// BOOK_SNAPSHOT_VERSION === 1
+```
 
 ## How `route` decides
 
@@ -212,18 +313,6 @@ Priority is first-match, matching ainovel-cli `internal/flow/router.go`:
 11. Else → writer next chapter
 
 `null` is valid: Engine then tries the plan_start stub, or stops (`complete` / `idle`).
-
-## Examples
-
-| File | What it shows |
-| --- | --- |
-| [`examples/short-book.ts`](examples/short-book.ts) | Short book to complete (`MockLlm` / `ReplayLlm`) |
-| [`examples/layered-book.ts`](examples/layered-book.ts) | Layered mid-book `architect_long` |
-| [`examples/opfs-store.ts`](examples/opfs-store.ts) | OPFS with MemoryStore fallback |
-| [`examples/engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) | Worker embed + protocol |
-| [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) | Snapshot zip round-trip |
-
-Index: [`examples/README.md`](examples/README.md) · [中文](examples/README.zh-CN.md)
 
 ## Public API
 
@@ -259,6 +348,7 @@ npm run test:short
 npm run test:layered
 npm run typecheck
 npm run build
+npx tsc -p tsconfig.examples.json
 ```
 
 Tests use **mock fixtures only** — no network, no providers, no real OPFS.

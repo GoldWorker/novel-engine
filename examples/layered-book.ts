@@ -1,4 +1,7 @@
 /**
+ * Scenario 2 — layered mid / long book.
+ * 场景 2：分层中长篇。Root README: Usage by scenario / 使用场景.
+ *
  * Layered mid-book host example — `architect_long` tools to `phase=complete`.
  * 分层中篇示例：一卷两弧，弧末审阅 → 弧摘要 → `expand_next_arc`，卷末完结。
  *

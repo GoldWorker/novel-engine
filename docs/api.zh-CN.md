@@ -6,7 +6,7 @@
 
 本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、真实 LLM 供应商、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。`src/` 从不导入 `node:fs` / `node:path`。
 
-可复制的宿主示例见 [`examples/`](../examples/)（[中文说明](../examples/README.zh-CN.md)）。
+宿主怎么用按场景写在 [根目录 README](../README.zh-CN.md#使用场景)（[English](../README.md#usage-by-scenario)）。可跑通的源码在 [`examples/`](../examples/)。
 
 ## 包入口
 
@@ -42,7 +42,7 @@ const engine = createEngine({ store, llm });
 await engine.run({ prompt: "写一本三章短篇：……" });
 ```
 
-完整短篇 / 分层 mock 见 [`examples/short-book.ts`](../examples/short-book.ts) 与 [`examples/layered-book.ts`](../examples/layered-book.ts)。
+同线程 mock：[场景 1（短篇完结）](../README.zh-CN.md#scenario-short-book) 与 [场景 2（分层中长篇）](../README.zh-CN.md#scenario-layered-book)。
 
 ## `route` 与领域类型
 
@@ -86,7 +86,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 `MemoryStore` 和 `OpfsStore` 实现了 `list()`，因此快照导出会包含每个文件。自定义适配器可以省略 `list`；导出时会探测已知书籍布局。
 
-OPFS 示例：[examples/opfs-store.ts](../examples/opfs-store.ts)。
+见 [场景 3（浏览器持久化）](../README.zh-CN.md#scenario-opfs)。
 
 ## 书籍快照
 
@@ -102,12 +102,7 @@ OPFS 示例：[examples/opfs-store.ts](../examples/opfs-store.ts)。
 
 Zip 由 [fflate](https://github.com/101arrowz/fflate)（浏览器构建）生成。匹配 `.*.tmp` 的临时文件会被跳过。
 
-```ts
-const bytes = await exportBookSnapshot(store);
-await importBookSnapshot(otherStore, bytes);
-```
-
-往返示例：[examples/snapshot-roundtrip.ts](../examples/snapshot-roundtrip.ts)。
+见 [场景 5（书稿快照）](../README.zh-CN.md#scenario-snapshot)。
 
 ## Mock LLM
 
@@ -141,7 +136,7 @@ await importBookSnapshot(otherStore, bytes);
 
 命令：`start`、`steer`、`pause`、`resume`、`snapshot`。通知：`event`、`snapshot`、`error`。
 
-嵌入示例：[examples/engine.worker.ts](../examples/engine.worker.ts) + [examples/worker-host.ts](../examples/worker-host.ts)。
+见 [场景 4（Web Worker）](../README.zh-CN.md#scenario-worker)。
 
 ## 高级 store 辅助
 

@@ -1,4 +1,7 @@
 /**
+ * Scenario 4 — embed in a Web Worker (worker thread). Pair with `worker-host.ts`.
+ * 场景 4：嵌入 Web Worker（Worker 线程）。与 `worker-host.ts` 配对。
+ *
  * Dedicated Worker entry — import from `novel-engine/worker` so the main-thread
  * client is tree-shaken out of this bundle.
  *

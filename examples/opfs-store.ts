@@ -1,4 +1,7 @@
 /**
+ * Scenario 3 — persist in the browser (OPFS).
+ * 场景 3：浏览器持久化（OPFS）。Root README: Usage by scenario / 使用场景.
+ *
  * OPFS store setup for a browser host.
  * 浏览器宿主的 OPFS 持久化：不可用时回落到 MemoryStore（刷新即丢失）。
  *

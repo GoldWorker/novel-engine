@@ -1,4 +1,7 @@
 /**
+ * Scenario 4 — embed in a Web Worker (main thread). Pair with `engine.worker.ts`.
+ * 场景 4：嵌入 Web Worker（主线程）。与 `engine.worker.ts` 配对。
+ *
  * Main-thread Worker client — start / steer / pause / resume / snapshot.
  * 主线程宿主：通过 `createEngineClient` 发送协议消息（v: 1）。
  *
