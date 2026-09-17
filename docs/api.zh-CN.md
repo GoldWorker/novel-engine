@@ -1,10 +1,10 @@
-# novel-engine API（0.2.0）
+# novel-engine API（0.3.0）
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
 宿主应用的稳定面。除非另有说明，一律从 `novel-engine` 导入。发布包只包含 `dist/`、`README.md` 和 `LICENSE`。
 
-本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。默认入口（`.` / `./worker`）不打包供应商 LLM 客户端。可选 fetch 适配器：[`novel-engine/llm`](llm-adapters.zh-CN.md)。`src/` 从不导入 `node:fs` / `node:path`。
+本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。默认入口（`.` / `./worker`）不打包供应商 LLM 客户端。可选 fetch 适配器：[`novel-engine/llm`](llm-adapters.zh-CN.md)。可选宿主 Session：[`novel-engine/session`](session.zh-CN.md)。`src/` 从不导入 `node:fs` / `node:path`。
 
 宿主怎么用按场景写在 [根目录 README](../README.zh-CN.md#使用场景)（[English](../README.md#usage-by-scenario)）。可跑通的源码在 [`examples/`](../examples/)。
 
@@ -15,11 +15,13 @@
 | `.` | `dist/index.js` | Engine、`route`、领域类型、stores、mocks、主线程 client、书籍快照 |
 | `./worker` | `dist/worker.js` | `attachEngineWorker`，以及供专用 Worker 使用的 Engine / stores / snapshot |
 | `./llm` | `dist/llm.js` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope）。不会打进 `.` 或 `./worker`。 |
+| `./session` | `dist/session.js` | 可选同线程宿主 Session（S0/S1 检查 + 工作区）。不会打进 `.` / `./worker` / `./llm`。 |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
+import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
 ## Engine（引擎）
@@ -61,6 +63,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 | `canTransitionPhase` / `validatePhaseTransition` / `PhaseTransitionError` | fn / class | 只允许向前的 Phase。 |
 | `canTransitionFlow` / `validateFlowTransition` / `FlowTransitionError` | fn / class | 非法 Flow 跳转失败。 |
 | `plannerForTier` | fn | short → `architect_short`；mid/long → `architect_long`。 |
+| `isPlanningTier` | fn | `"short" \| "mid" \| "long"` 的类型守卫。 |
 | `latestCompleted` / `nextChapter` / `isResumable` | fn | Progress 辅助函数。 |
 | `REVIEW_INTERVAL` / `shouldReview` | const / fn | 非分层全局审阅每 5 章一次。 |
 | `ArcBoundary` | type | 分层弧/卷末事实。 |
@@ -133,6 +136,25 @@ Zip 由 [fflate](https://github.com/101arrowz/fflate)（浏览器构建）生成
 tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放进公开浏览器包**——生产请走 BFF。
 
 示意：[`examples/llm-openai.ts`](../examples/llm-openai.ts)。
+
+## 可选宿主 Session（`novel-engine/session`）
+
+不属于 `.`、`./worker` 或 `./llm`。同线程检查 + 多书工作区（S0/S1）。指南：[session.zh-CN.md](session.zh-CN.md)（[English](session.md)）。场景：[README §7](../README.zh-CN.md#scenario-session)。
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `createNovelSession({ store, llm?, bookId })` | fn | 同线程 session。S1 中 `llm` 未使用（为 S2 预留）。 |
+| `NovelSession` | type | `getFoundation` / `getProgress` / `inspectFoundation` / `assertReadyToWrite` / `listArtifacts` / 快照封装 / `close`。 |
+| `createNovelWorkspace({ createStore, llm?, indexStore? })` | fn | 每个 `bookId` 一个 store。可选 `indexStore` 持久化 `_index.json`。 |
+| `NovelWorkspace` | type | `createBook` / `open` / `switchTo` / `listBooks` / `close` / `currentBookId`。 |
+| `FoundationMeta` / `FoundationGap` / `InspectResult` / `PlanningInfo` | types | 检查载荷。缺口含中英短提示。 |
+| `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`。 |
+| `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | 已关闭的 session/工作区；未知 `bookId`。 |
+| `WORKSPACE_INDEX_PATH` | const | `"_index.json"`。 |
+
+**不在 S1：** `generateFoundation`、upsert、自动写作、ChapterRunner、Worker session 桥（S2–S4）。
+
+示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)。
 
 ## Worker 宿主
 

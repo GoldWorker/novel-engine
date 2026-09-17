@@ -4,19 +4,20 @@
 
 可复用的 **TypeScript** 小说引擎 SDK，给想在浏览器（或 Node 测试）里生成小说的宿主（host）使用。纯 ESM，无 UI、无 React 绑定、无 TUI。
 
-**0.2.0** 增加可选入口 `novel-engine/llm`（OpenAI / Anthropic / DashScope 的 fetch 适配器）。默认包仍然不含供应商客户端。
+**0.3.0** 增加可选入口 `novel-engine/session`（同线程检查 + 多书工作区），并保留 `novel-engine/llm`（OpenAI / Anthropic / DashScope 的 fetch 适配器）。默认包仍然不含供应商客户端，也不会打进 session。
 
 默认的 `novel-engine` / `novel-engine/worker` 从不连接真实模型。`src/` 中也从不使用 `node:fs` / `node:path`。
 
 路由模型受 [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli)（`internal/flow/router.go`、`internal/host/engine.go`）启发。
 
-稳定导出见 [docs/api.zh-CN.md](docs/api.zh-CN.md)（[English API](docs/api.md)）。
+稳定导出见 [docs/api.zh-CN.md](docs/api.zh-CN.md)（[English API](docs/api.md)）。Session：[docs/session.zh-CN.md](docs/session.zh-CN.md)。
 
-**怎么用？** 先看 [使用场景](#使用场景) — [短篇完结](#scenario-short-book) · [分层中长篇](#scenario-layered-book) · [浏览器持久化](#scenario-opfs) · [Web Worker](#scenario-worker) · [书稿快照](#scenario-snapshot) · [真实 LLM 适配器](#scenario-llm)。可跑通的源码在 [`examples/`](examples/)。
+**怎么用？** 先看 [使用场景](#使用场景) — [短篇完结](#scenario-short-book) · [分层中长篇](#scenario-layered-book) · [浏览器持久化](#scenario-opfs) · [Web Worker](#scenario-worker) · [书稿快照](#scenario-snapshot) · [真实 LLM 适配器](#scenario-llm) · [宿主 Session](#scenario-session)。可跑通的源码在 [`examples/`](examples/)。
 
 ## 不包含什么
 
 - 默认 `novel-engine` / `novel-engine/worker` 包里的供应商 LLM 客户端——请自行注入 `LlmPort`，或导入可选的 [`novel-engine/llm`](docs/llm-adapters.zh-CN.md)（fetch 适配器；**不要把 API Key 放进公开浏览器应用**）
+- 默认包里的宿主 Session——请导入可选的 [`novel-engine/session`](docs/session.zh-CN.md)（S0/S1 检查 + 工作区；S2 generateFoundation / S3 ChapterRunner / S4 Worker session 尚未包含）
 - React 包、Demo SPA 或任何可视化应用
 - Arbiter（仲裁器）完整语义场景（`plan_start` 只是关键词桩）
 - ChapterAdvanceGate 审阅模式 UI
@@ -56,6 +57,7 @@ npm install novel-engine
 | `.` | `novel-engine` | Engine、stores、client、mocks、snapshot、`route` |
 | `./worker` | `novel-engine/worker` | `attachEngineWorker` + Engine/stores，供专用 Worker 使用 |
 | `./llm` | `novel-engine/llm` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope） |
+| `./session` | `novel-engine/session` | 可选同线程宿主 Session（检查 + 工作区） |
 
 发布的 `files`：`dist/`、`README.md`、`LICENSE`。
 
@@ -73,6 +75,7 @@ npm install novel-engine
 | [4. 嵌入 Web Worker](#scenario-worker) | 专用 Worker + 主线程 client：`start` / `steer` / `pause` / `resume` / `snapshot`。 | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. 书稿快照导入导出](#scenario-snapshot) | 把 store 中每个路径打成 zip（fflate），再 merge 进另一个 `StorePort`。 | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. 注入真实 LLM](#scenario-llm) | 宿主侧通过可选的 `novel-engine/llm` 得到 OpenAI / Anthropic / DashScope 的 `LlmPort`。密钥放在 BFF。 | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
+| [7. 宿主 Session（检查 + 工作区）](#scenario-session) | 同线程 `NovelSession` / `NovelWorkspace`：基础设定缺口与多书切换。尚无生成/写作（S2–S4）。 | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
 
 `plan_start` 是**确定性桩**（无 Arbiter LLM）：提示词含 `长篇` 则选 `architect_long` / `long`；含 `中篇` 或 `分层` 则选 `architect_long` / `mid`；否则 `architect_short` / `short`。Worker 失败会重试一次，然后暂停。同一条 Route 指令连续五次也会暂停（死锁上限）。
 
@@ -326,6 +329,40 @@ const engine = createEngine({ store: new MemoryStore(), llm });
 await engine.run({ prompt: "写一本三章短篇：……" });
 ```
 
+<a id="scenario-session"></a>
+
+### 7. 宿主 Session（`novel-engine/session`）
+
+**何时：** 同线程宿主想检查一份 store 是否写得动，或在多本书之间切换，但不跑 Engine 循环。
+
+可选子路径。仅 S0/S1：`getFoundation` / `inspectFoundation` / `assertReadyToWrite` / 工作区 `createBook` / `switchTo`。中长篇只要有有效的 `layered_outline.json`，不再需要扁平 `outline.json`。**尚未包含：** `generateFoundation`（S2）、ChapterRunner（S3）、Worker session（S4）。
+
+详情：[docs/session.zh-CN.md](docs/session.zh-CN.md)（[English](docs/session.md)）。示意：[`examples/session-workspace.ts`](examples/session-workspace.ts)。
+
+```ts
+import { MemoryStore, PATHS, writeJson } from "novel-engine";
+import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
+
+const store = new MemoryStore();
+const session = await createNovelSession({ store, bookId: "letter" });
+await writeJson(store, PATHS.book, { title: "无主的信", synopsis: "……" });
+const inspected = await session.inspectFoundation({ prompt: "写一本三章短篇" });
+// 在基础设定齐全且 phase 为 writing/complete 之前，inspected.readyToWrite === false
+
+const stores = new Map<string, MemoryStore>();
+const ws = createNovelWorkspace({
+  createStore(bookId) {
+    const existing = stores.get(bookId);
+    if (existing) return existing;
+    const next = new MemoryStore();
+    stores.set(bookId, next);
+    return next;
+  },
+});
+await ws.createBook({ bookId: "a", title: "无主的信" });
+await ws.switchTo("a");
+```
+
 ## `route` 如何决策
 
 优先级为先匹配先返回，对齐 ainovel-cli 的 `internal/flow/router.go`：
@@ -366,9 +403,10 @@ import {
 
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
+import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-稳定面（领域类型、Worker 协议、快照常量）见 [docs/api.zh-CN.md](docs/api.zh-CN.md)。
+稳定面（领域类型、Worker 协议、快照常量）见 [docs/api.zh-CN.md](docs/api.zh-CN.md)。Session 见 [docs/session.zh-CN.md](docs/session.zh-CN.md)。
 
 ## 开发 / 测试
 

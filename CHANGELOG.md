@@ -4,7 +4,17 @@
 
 ### Added
 
-- **Optional `novel-engine/llm`** — fetch-based `LlmPort` adapters for OpenAI Chat Completions, Anthropic Messages, and DashScope OpenAI-compatible mode (`compatible-mode/v1`). Factories: `createOpenAiLlm`, `createAnthropicLlm`, `createDashScopeLlm`, `createVendorLlm`. No `openai` / `@anthropic-ai/sdk` dependency. Default `.` / `./worker` bundles stay vendor-free. Package version **0.2.0**.
+- **Optional `novel-engine/session` (0.3.0)** — same-thread host façade: `createNovelSession` / `createNovelWorkspace`. Read-through `getFoundation` / `inspectFoundation` / `assertReadyToWrite` / `listArtifacts`, plus snapshot wrappers. Multi-book workspace with one `StorePort` per `bookId` (`createStore` factory). Default `.` / `./worker` / `./llm` bundles do not import session. Docs: `docs/session.md` / `docs/session.zh-CN.md`. S2 `generateFoundation`, S3 ChapterRunner, S4 Worker session bridge are not in this release.
+
+### Fixed
+
+- **`foundationMissing`** — mid/long with a valid non-empty `layered_outline.json` (volume/arc shape) no longer requires a flat `outline.json`. Short tier still does. Optional `tier` argument; otherwise inferred from `run_meta.planningTier` / `progress.planningTier` / `progress.layered` / presence of a valid layered outline. Fingerprint skips a missing `outline.json` when the layered outline is valid so `novel_context` / `audit_foundation` still work.
+
+## 0.2.0 — 2026-09-17
+
+### Added
+
+- **Optional `novel-engine/llm`** — fetch-based `LlmPort` adapters for OpenAI Chat Completions, Anthropic Messages, and DashScope OpenAI-compatible mode (`compatible-mode/v1`). Factories: `createOpenAiLlm`, `createAnthropicLlm`, `createDashScopeLlm`, `createVendorLlm`. No `openai` / `@anthropic-ai/sdk` dependency. Default `.` / `./worker` bundles stay vendor-free.
 
 ### Documentation
 

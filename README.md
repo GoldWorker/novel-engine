@@ -4,19 +4,20 @@
 
 Reusable **TypeScript** Novel Engine SDK for hosts that want to generate novels in the browser (or Node tests). Pure ESM, no UI, no React bindings, no TUI.
 
-**0.2.0** adds an optional `novel-engine/llm` entry (fetch adapters for OpenAI, Anthropic, DashScope). Default bundles still ship no vendor clients.
+**0.3.0** adds an optional `novel-engine/session` entry (same-thread inspect + multi-book workspace) and keeps `novel-engine/llm` (fetch adapters for OpenAI, Anthropic, DashScope). Default bundles still ship no vendor clients and do not pull session.
 
 The default `novel-engine` / `novel-engine/worker` entries never talk to a real model. `src/` never uses `node:fs` / `node:path`.
 
 Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli) (`internal/flow/router.go`, `internal/host/engine.go`).
 
-Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)).
+Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)). Session: [docs/session.md](docs/session.md).
 
-**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm). Runnable sources stay in [`examples/`](examples/).
+**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm) · [host session](#scenario-session). Runnable sources stay in [`examples/`](examples/).
 
 ## What's not included
 
 - Vendor LLM clients in the default `novel-engine` / `novel-engine/worker` bundles — inject `LlmPort`, or import optional [`novel-engine/llm`](docs/llm-adapters.md) (fetch adapters; **do not put API keys in a public browser app**)
+- Host session in the default bundles — import optional [`novel-engine/session`](docs/session.md) (S0/S1 inspect + workspace; S2 generateFoundation / S3 ChapterRunner / S4 Worker session are not included yet)
 - React package, Demo SPA, or any visual app
 - Arbiter full semantic scenes (`plan_start` is a keyword stub)
 - ChapterAdvanceGate review-mode UI
@@ -56,6 +57,7 @@ Package exports:
 | `.` | `novel-engine` | Engine, stores, client, mocks, snapshot, `route` |
 | `./worker` | `novel-engine/worker` | `attachEngineWorker` + Engine/stores for a dedicated worker |
 | `./llm` | `novel-engine/llm` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope) |
+| `./session` | `novel-engine/session` | Optional same-thread host session (inspect + workspace) |
 
 Published `files`: `dist/`, `README.md`, `LICENSE`.
 
@@ -73,6 +75,7 @@ Scenarios compose: the Worker example already calls `createOpfsStore()`; snapsho
 | [4. Embed in a Web Worker](#scenario-worker) | Dedicated worker + main-thread client: `start` / `steer` / `pause` / `resume` / `snapshot`. | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. Book snapshot export / import](#scenario-snapshot) | Zip every store path (fflate) and merge-restore into another `StorePort`. | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. Inject a real LLM](#scenario-llm) | Host-side OpenAI / Anthropic / DashScope `LlmPort` via optional `novel-engine/llm`. Keys belong on a BFF. | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
+| [7. Host session (inspect + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace` for foundation gaps and multi-book switching. No generate/write yet (S2–S4). | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
 
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
 
@@ -326,6 +329,40 @@ const engine = createEngine({ store: new MemoryStore(), llm });
 await engine.run({ prompt: "写一本三章短篇：……" });
 ```
 
+<a id="scenario-session"></a>
+
+### 7. Host session (`novel-engine/session`)
+
+**When:** A same-thread host wants to inspect whether a store is ready to write, or switch among several books, without running the Engine loop.
+
+Optional subpath. S0/S1 only: `getFoundation` / `inspectFoundation` / `assertReadyToWrite` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. **Not yet:** `generateFoundation` (S2), ChapterRunner (S3), Worker session (S4).
+
+Details: [docs/session.md](docs/session.md) ([中文](docs/session.zh-CN.md)). Sketch: [`examples/session-workspace.ts`](examples/session-workspace.ts).
+
+```ts
+import { MemoryStore, PATHS, writeJson } from "novel-engine";
+import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
+
+const store = new MemoryStore();
+const session = await createNovelSession({ store, bookId: "letter" });
+await writeJson(store, PATHS.book, { title: "无主的信", synopsis: "……" });
+const inspected = await session.inspectFoundation({ prompt: "写一本三章短篇" });
+// inspected.readyToWrite === false until foundation + writing/complete phase
+
+const stores = new Map<string, MemoryStore>();
+const ws = createNovelWorkspace({
+  createStore(bookId) {
+    const existing = stores.get(bookId);
+    if (existing) return existing;
+    const next = new MemoryStore();
+    stores.set(bookId, next);
+    return next;
+  },
+});
+await ws.createBook({ bookId: "a", title: "无主的信" });
+await ws.switchTo("a");
+```
+
 ## How `route` decides
 
 Priority is first-match, matching ainovel-cli `internal/flow/router.go`:
@@ -366,6 +403,7 @@ import {
 
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
+import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
 See [docs/api.md](docs/api.md) for the stable surface (domain types, Worker protocol, snapshot constants).

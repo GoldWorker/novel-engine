@@ -13,7 +13,8 @@
     "paths": {
       "novel-engine": ["./src/index.ts"],
       "novel-engine/worker": ["./src/worker.ts"],
-      "novel-engine/llm": ["./src/adapters/llm/index.ts"]
+      "novel-engine/llm": ["./src/adapters/llm/index.ts"],
+      "novel-engine/session": ["./src/session/index.ts"]
     }
   },
   "include": ["examples/**/*.ts"]

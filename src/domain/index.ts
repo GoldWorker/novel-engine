@@ -18,7 +18,7 @@ export {
 } from "./flow.js";
 
 export type { PlanningTier } from "./planning-tier.js";
-export { PLANNING_TIERS, plannerForTier } from "./planning-tier.js";
+export { PLANNING_TIERS, plannerForTier, isPlanningTier } from "./planning-tier.js";
 
 export type { Progress } from "./progress.js";
 export { latestCompleted, nextChapter, isResumable } from "./progress.js";

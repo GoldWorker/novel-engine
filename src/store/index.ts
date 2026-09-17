@@ -33,7 +33,12 @@ export {
   loadLayeredOutline,
   parseLayeredVolumes,
 } from "./layered.js";
-export { foundationMissing, foundationFingerprint } from "./foundation.js";
+export {
+  foundationMissing,
+  foundationFingerprint,
+  hasValidLayeredOutline,
+  resolveFoundationTier,
+} from "./foundation.js";
 export type {
   BookMetadata,
   OutlineEntry,

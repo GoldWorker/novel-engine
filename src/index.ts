@@ -18,6 +18,7 @@ export {
   validateFlowTransition,
   FlowTransitionError,
   plannerForTier,
+  isPlanningTier,
   latestCompleted,
   nextChapter,
   isResumable,
