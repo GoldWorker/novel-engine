@@ -6,7 +6,7 @@ Stable surface for host apps. Import from `novel-engine` unless noted. The publi
 
 This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, real LLM providers, Arbiter full scenes, or ChapterAdvanceGate review UI. `src/` never imports `node:fs` / `node:path`.
 
-Copy-pasteable host examples: [`examples/`](../examples/) ([中文说明](../examples/README.zh-CN.md)).
+Host how-to is grouped by scenario in the [root README](../README.md#usage-by-scenario) ([中文](../README.zh-CN.md#使用场景)). Runnable sources: [`examples/`](../examples/).
 
 ## Package entries
 
@@ -42,7 +42,7 @@ const engine = createEngine({ store, llm });
 await engine.run({ prompt: "写一本三章短篇：……" });
 ```
 
-Full short / layered mocks: [`examples/short-book.ts`](../examples/short-book.ts) and [`examples/layered-book.ts`](../examples/layered-book.ts).
+Same-thread mocks: [scenario 1 (short book)](../README.md#scenario-short-book) and [scenario 2 (layered)](../README.md#scenario-layered-book).
 
 ## `route` and domain
 
@@ -86,7 +86,7 @@ Hosts implement `LlmPort` against a gateway or WebLLM. This package never ships 
 
 `MemoryStore` and `OpfsStore` implement `list()` so snapshot export includes every file. Custom adapters may omit `list`; export then probes the known book layout.
 
-OPFS example: [`examples/opfs-store.ts`](../examples/opfs-store.ts).
+See [scenario 3 (OPFS persist)](../README.md#scenario-opfs).
 
 ## Book snapshot
 
@@ -102,12 +102,7 @@ OPFS example: [`examples/opfs-store.ts`](../examples/opfs-store.ts).
 
 Zip is built with [fflate](https://github.com/101arrowz/fflate) (browser build). Temp files matching `.*.tmp` are skipped.
 
-```ts
-const bytes = await exportBookSnapshot(store);
-await importBookSnapshot(otherStore, bytes);
-```
-
-Round-trip example: [`examples/snapshot-roundtrip.ts`](../examples/snapshot-roundtrip.ts).
+See [scenario 5 (book snapshot)](../README.md#scenario-snapshot).
 
 ## Mock LLM
 
@@ -141,7 +136,7 @@ From `novel-engine/worker`:
 
 Commands: `start`, `steer`, `pause`, `resume`, `snapshot`. Notices: `event`, `snapshot`, `error`.
 
-Embed example: [`examples/engine.worker.ts`](../examples/engine.worker.ts) + [`examples/worker-host.ts`](../examples/worker-host.ts).
+See [scenario 4 (Web Worker)](../README.md#scenario-worker).
 
 ## Advanced store helpers
 

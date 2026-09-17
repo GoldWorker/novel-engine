@@ -4,6 +4,7 @@
 
 ### Documentation
 
+- Reorganize host usage in the root README **by scenario** (short book, layered mid/long, OPFS, Worker, snapshot). `README.zh-CN.md` mirrors the same map. `examples/` stays the canonical runnable sources; its READMEs now point at the root hub instead of repeating the how-to.
 - Add Chinese README (`README.zh-CN.md`) and API docs (`docs/api.zh-CN.md`).
 - Add copy-pasteable usage examples under `examples/`.
 
