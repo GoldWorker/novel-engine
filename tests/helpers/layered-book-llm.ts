@@ -1,12 +1,12 @@
 import type { LlmCompletionRequest, LlmCompletionResult, LlmToolCall } from "../../src/index.js";
-import type { Character, OutlineEntry, VolumeOutline, WorldRule } from "../../src/index.js";
+import type { Character, WorldRule } from "../../src/index.js";
 
 export interface LayeredBookFixture {
   prompt: string;
   book: { title: string; synopsis: string };
   premise: string;
-  layered_outline: VolumeOutline[];
-  expansion: { title: string; goal: string; chapters: OutlineEntry[] };
+  layered_outline: unknown;
+  expansion: { title: string; goal: string; chapters: unknown[] };
   characters: Character[];
   world_rules: WorldRule[];
   chapters: Record<

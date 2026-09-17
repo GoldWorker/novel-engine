@@ -15,7 +15,7 @@ import {
 } from "../src/index.js";
 import { layeredBookLlmHandler, type LayeredBookFixture } from "./helpers/layered-book-llm.js";
 
-const book = layeredBook as LayeredBookFixture;
+const book = layeredBook as unknown as LayeredBookFixture;
 
 describe("Engine layered-book integration", () => {
   it("runs a 1-volume / 2-arc mock book through arc-end Route to complete", async () => {
