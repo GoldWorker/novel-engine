@@ -1,0 +1,22 @@
+[
+  { "from": "", "to": "init", "ok": true },
+  { "from": "", "to": "writing", "ok": true },
+  { "from": "init", "to": "init", "ok": true },
+  { "from": "init", "to": "premise", "ok": true },
+  { "from": "init", "to": "outline", "ok": true },
+  { "from": "init", "to": "writing", "ok": true },
+  { "from": "init", "to": "complete", "ok": true },
+  { "from": "premise", "to": "outline", "ok": true },
+  { "from": "premise", "to": "writing", "ok": true },
+  { "from": "outline", "to": "writing", "ok": true },
+  { "from": "writing", "to": "complete", "ok": true },
+  { "from": "complete", "to": "complete", "ok": true },
+  { "from": "outline", "to": "premise", "ok": false },
+  { "from": "writing", "to": "outline", "ok": false },
+  { "from": "complete", "to": "writing", "ok": false },
+  { "from": "complete", "to": "init", "ok": false },
+  { "from": "init", "to": "", "ok": false },
+  { "from": "writing", "to": "", "ok": false },
+  { "from": "bogus", "to": "bogus", "ok": true },
+  { "from": "bogus", "to": "writing", "ok": false }
+]
