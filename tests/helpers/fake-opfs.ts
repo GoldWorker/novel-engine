@@ -101,6 +101,10 @@ export class FakeDirectory implements OpfsDirectoryHandle {
     }
     this.entries.delete(name);
   }
+
+  async *keys(): AsyncGenerator<string> {
+    yield* this.entries.keys();
+  }
 }
 
 class FakeFileHandle implements OpfsFileHandle {

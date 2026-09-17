@@ -1,7 +1,7 @@
 {
   "name": "novel-engine",
-  "version": "0.0.1",
-  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Phase 3: layered mid/long-book tools on Engine + MemoryStore + OpfsStore + Worker host.",
+  "version": "0.1.0",
+  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Engine, route, MemoryStore, OpfsStore, Worker host, and book snapshot zip.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -11,11 +11,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./worker": {
       "types": "./dist/worker.d.ts",
-      "import": "./dist/worker.js"
+      "import": "./dist/worker.js",
+      "default": "./dist/worker.js"
     }
   },
   "files": [
@@ -29,6 +31,8 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
+    "test:short": "vitest run tests/engine.short-book.test.ts",
+    "test:layered": "vitest run tests/engine.layered-book.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -50,5 +54,8 @@
     "tsup": "^8.5.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
   }
 }

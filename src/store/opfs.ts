@@ -9,6 +9,7 @@ import type {
   OpfsFileHandle,
   OpfsStorageManager,
 } from "./opfs-handles.js";
+import { probeKnownBookPaths } from "./list-paths.js";
 import { PATHS } from "./paths.js";
 import { assembleState } from "./state.js";
 
@@ -131,6 +132,20 @@ export class OpfsStore implements StorePort {
     return (await this.resolveFile(path, false)) !== null;
   }
 
+  /**
+   * Sorted logical paths under the OPFS root, optionally filtered by prefix.
+   * Skips atomic-write temp files (`.name.tmp`). When the directory handle
+   * cannot iterate `keys()`, falls back to probing known book paths.
+   */
+  async list(prefix = ""): Promise<string[]> {
+    if (typeof this.root.keys !== "function") {
+      return probeKnownBookPaths(this, prefix);
+    }
+    const out: string[] = [];
+    await this.collectPaths(this.root, "", out);
+    return out.filter((path) => prefix === "" || path.startsWith(prefix)).sort();
+  }
+
   /** Decode a stored artifact as UTF-8 text. */
   async readText(path: string): Promise<string | null> {
     const data = await this.read(path);
@@ -179,6 +194,36 @@ export class OpfsStore implements StorePort {
     await destWritable.write(new Uint8Array(await file.arrayBuffer()));
     await destWritable.close();
     await dir.removeEntry(tmpName);
+  }
+
+  private async collectPaths(
+    dir: OpfsDirectoryHandle,
+    prefix: string,
+    out: string[],
+  ): Promise<void> {
+    if (typeof dir.keys !== "function") {
+      return;
+    }
+    for await (const name of dir.keys()) {
+      if (name.startsWith(".") && name.endsWith(".tmp")) {
+        continue;
+      }
+      const path = prefix === "" ? name : `${prefix}/${name}`;
+      try {
+        await dir.getFileHandle(name);
+        out.push(path);
+        continue;
+      } catch (err) {
+        if (isNotFound(err)) {
+          continue;
+        }
+        if (!isTypeMismatch(err)) {
+          throw err;
+        }
+      }
+      const child = await dir.getDirectoryHandle(name);
+      await this.collectPaths(child, path, out);
+    }
   }
 
   private async resolveParent(
@@ -242,5 +287,19 @@ function isNotFound(err: unknown): boolean {
     name === "NotFound" ||
     message.includes("NotFound") ||
     message.includes("not found")
+  );
+}
+
+function isTypeMismatch(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) {
+    return false;
+  }
+  const name = "name" in err ? String(err.name) : "";
+  const message = "message" in err ? String(err.message) : "";
+  return (
+    name === "TypeMismatchError" ||
+    name === "TypeMismatch" ||
+    message.includes("TypeMismatch") ||
+    message.includes("is a directory")
   );
 }

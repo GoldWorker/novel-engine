@@ -26,6 +26,8 @@ export interface OpfsDirectoryHandle {
   ): Promise<OpfsDirectoryHandle>;
   getFileHandle(name: string, options?: { create?: boolean }): Promise<OpfsFileHandle>;
   removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
+  /** File System Access `keys()` — used by `OpfsStore.list`. */
+  keys?(): AsyncIterableIterator<string>;
 }
 
 export interface OpfsStorageManager {
