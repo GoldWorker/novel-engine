@@ -1,5 +1,6 @@
 import type { Flow } from "./flow.js";
 import type { Phase } from "./phase.js";
+import type { PlanningTier } from "./planning-tier.js";
 
 /**
  * Progress facts consumed by `route`. Field names match ainovel-cli `domain.Progress`
@@ -18,6 +19,11 @@ export interface Progress {
   completedChapters: readonly number[];
   pendingRewrites: readonly number[];
   layered: boolean;
+  /**
+   * Optional planning scale. Session / `foundationMissing` prefer
+   * `meta/run_meta.json` when this is omitted.
+   */
+  planningTier?: PlanningTier | "";
 }
 
 /** Largest completed chapter number; 0 when none are complete. */

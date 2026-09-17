@@ -1,7 +1,7 @@
 {
   "name": "novel-engine",
-  "version": "0.2.0",
-  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Engine, route, MemoryStore, OpfsStore, Worker host, book snapshot zip, and optional fetch LLM adapters.",
+  "version": "0.3.0",
+  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Engine, route, MemoryStore, OpfsStore, Worker host, book snapshot zip, optional fetch LLM adapters, and a same-thread host session.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -23,6 +23,11 @@
       "types": "./dist/llm.d.ts",
       "import": "./dist/llm.js",
       "default": "./dist/llm.js"
+    },
+    "./session": {
+      "types": "./dist/session.d.ts",
+      "import": "./dist/session.js",
+      "default": "./dist/session.js"
     }
   },
   "files": [

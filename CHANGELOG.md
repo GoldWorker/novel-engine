@@ -4,7 +4,18 @@
 
 ### Added
 
-- **Optional `novel-engine/llm`** — fetch-based `LlmPort` adapters for OpenAI Chat Completions, Anthropic Messages, and DashScope OpenAI-compatible mode (`compatible-mode/v1`). Factories: `createOpenAiLlm`, `createAnthropicLlm`, `createDashScopeLlm`, `createVendorLlm`. No `openai` / `@anthropic-ai/sdk` dependency. Default `.` / `./worker` bundles stay vendor-free. Package version **0.2.0**.
+- **Optional `novel-engine/session` (0.3.0)** — same-thread host façade: `createNovelSession` / `createNovelWorkspace`. S0/S1: `getFoundation` / `inspectFoundation` / `assertReadyToWrite` / workspace. **S2:** `upsertFoundation`, structured one-shot `generateFoundation` (JSON in `LlmPort.complete().text` → upsert; not an Engine loop), and `startAutoWrite` (optional generate, then `needs_foundation` or `createEngine().run`). **S3:** Session ChapterRunner `session.chapter.get` / `saveFinal` / `write` (`create` / `continue` / `rewrite` / `polish`) — dedicated writer loop reusing `src/workers/tools.ts`; not `Engine.run` and not `pendingRewrites`. Mutual exclusion via `SessionBusyError`. **S4:** Worker bridge `createSessionClient` / `attachSessionWorker` — adapter over the same `NovelSession` (`ns: "session"` protocol); `generateFoundation` stays in the worker with the store; `LlmPort` should `fetch` a host BFF (no vendor keys in the worker). `subscribe` for `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`. Default `.` / `./worker` / `./llm` bundles do not import session. Docs: `docs/session.md` / `docs/session.zh-CN.md`.
+
+### Fixed
+
+- **`foundationMissing`** — mid/long with a valid non-empty `layered_outline.json` (volume/arc shape) no longer requires a flat `outline.json`. Short tier still does. Optional `tier` argument; otherwise inferred from `run_meta.planningTier` / `progress.planningTier` / `progress.layered` / presence of a valid layered outline. Fingerprint skips a missing `outline.json` when the layered outline is valid so `novel_context` / `audit_foundation` still work.
+- **`StorePort.remove?`** — optional delete (`MemoryStore`, `OpfsStore`). Session uses it to drop a stale `meta/foundation_audit.json` after fingerprint files change.
+
+## 0.2.0 — 2026-09-17
+
+### Added
+
+- **Optional `novel-engine/llm`** — fetch-based `LlmPort` adapters for OpenAI Chat Completions, Anthropic Messages, and DashScope OpenAI-compatible mode (`compatible-mode/v1`). Factories: `createOpenAiLlm`, `createAnthropicLlm`, `createDashScopeLlm`, `createVendorLlm`. No `openai` / `@anthropic-ai/sdk` dependency. Default `.` / `./worker` bundles stay vendor-free.
 
 ### Documentation
 

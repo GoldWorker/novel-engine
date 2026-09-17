@@ -18,6 +18,8 @@ Do not duplicate the how-to here — the root README is the hub. This folder is 
 | [4. Embed in a Web Worker](../README.md#scenario-worker) | [`engine.worker.ts`](engine.worker.ts) + [`worker-host.ts`](worker-host.ts) |
 | [5. Book snapshot export / import](../README.md#scenario-snapshot) | [`snapshot-roundtrip.ts`](snapshot-roundtrip.ts) |
 | [6. Inject a real LLM](../README.md#scenario-llm) | [`llm-openai.ts`](llm-openai.ts) |
+| [7. Host session](../README.md#scenario-session) | [`session-workspace.ts`](session-workspace.ts) |
+| [8. Session over Worker](../README.md#scenario-session-worker) | [`session.worker.ts`](session.worker.ts) + [`session-host.ts`](session-host.ts) |
 
 Worker embed needs **both** files. Replace the `LlmPort` stub in the worker file with a gateway, WebLLM, or `novel-engine/llm` behind a BFF. See [docs/llm-adapters.md](../docs/llm-adapters.md).
 

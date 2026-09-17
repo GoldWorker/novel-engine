@@ -4,6 +4,10 @@ export const PLANNING_TIERS = ["short", "mid", "long"] as const;
 
 export type PlanningTier = (typeof PLANNING_TIERS)[number];
 
+export function isPlanningTier(value: unknown): value is PlanningTier {
+  return value === "short" || value === "mid" || value === "long";
+}
+
 /**
  * Planner identity from a persisted planning scale.
  * Matches ainovel-cli `plannerForTier`: short → architect_short, mid/long → architect_long.

@@ -51,6 +51,10 @@ export class MemoryStore implements StorePort {
     return this.files.has(normalizeStorePath(path));
   }
 
+  async remove(path: string): Promise<void> {
+    this.files.delete(normalizeStorePath(path));
+  }
+
   /** Sorted logical paths, optionally filtered by prefix. Used by snapshot export. */
   list(prefix = ""): string[] {
     return [...this.files.keys()].filter((path) => path.startsWith(prefix)).sort();

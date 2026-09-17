@@ -1,10 +1,10 @@
-# novel-engine API (0.2.0)
+# novel-engine API (0.3.0)
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
 Stable surface for host apps. Import from `novel-engine` unless noted. The published package only ships `dist/`, `README.md`, and `LICENSE`.
 
-This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, Arbiter full scenes, or ChapterAdvanceGate review UI. Default entries (`.` / `./worker`) do not bundle vendor LLM clients. Optional fetch adapters: [`novel-engine/llm`](llm-adapters.md). `src/` never imports `node:fs` / `node:path`.
+This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, Arbiter full scenes, or ChapterAdvanceGate review UI. Default entries (`.` / `./worker`) do not bundle vendor LLM clients. Optional fetch adapters: [`novel-engine/llm`](llm-adapters.md). Optional host session: [`novel-engine/session`](session.md). `src/` never imports `node:fs` / `node:path`.
 
 Host how-to is grouped by scenario in the [root README](../README.md#usage-by-scenario) ([中文](../README.zh-CN.md#使用场景)). Runnable sources: [`examples/`](../examples/).
 
@@ -15,11 +15,13 @@ Host how-to is grouped by scenario in the [root README](../README.md#usage-by-sc
 | `.` | `dist/index.js` | Engine, `route`, domain types, stores, mocks, main-thread client, book snapshot |
 | `./worker` | `dist/worker.js` | `attachEngineWorker` plus Engine / stores / snapshot for a dedicated worker |
 | `./llm` | `dist/llm.js` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope). Not pulled into `.` or `./worker`. |
+| `./session` | `dist/session.js` | Optional same-thread host session (S0–S4 inspect, generate, auto-write, ChapterRunner, Worker bridge, workspace). Not pulled into `.` / `./worker` / `./llm`. |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
+import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
 ## Engine
@@ -61,6 +63,7 @@ Same-thread mocks: [scenario 1 (short book)](../README.md#scenario-short-book) a
 | `canTransitionPhase` / `validatePhaseTransition` / `PhaseTransitionError` | fn / class | Forward-only Phase. |
 | `canTransitionFlow` / `validateFlowTransition` / `FlowTransitionError` | fn / class | Illegal Flow jumps fail. |
 | `plannerForTier` | fn | short → `architect_short`; mid/long → `architect_long`. |
+| `isPlanningTier` | fn | Type guard for `"short" \| "mid" \| "long"`. |
 | `latestCompleted` / `nextChapter` / `isResumable` | fn | Progress helpers. |
 | `REVIEW_INTERVAL` / `shouldReview` | const / fn | Non-layered global review every 5 chapters. |
 | `ArcBoundary` | type | Layered arc/volume-end facts. |
@@ -86,7 +89,7 @@ Hosts implement `LlmPort` against a gateway or WebLLM, or import optional fetch 
 | `OpfsUnavailableError` | class | Thrown by strict open. |
 | `PATHS` | const | Logical layout (`meta/progress.json`, `outline.json`, …). |
 
-`MemoryStore` and `OpfsStore` implement `list()` so snapshot export includes every file. Custom adapters may omit `list`; export then probes the known book layout.
+`MemoryStore` and `OpfsStore` implement `list()` so snapshot export includes every file. Custom adapters may omit `list`; export then probes the known book layout. Optional `remove(path)` deletes a path (no-op if missing); Session uses it to invalidate a stale foundation audit.
 
 See [scenario 3 (OPFS persist)](../README.md#scenario-opfs).
 
@@ -133,6 +136,33 @@ Not part of `.` or `./worker`. Fetch-based; no `openai` / `@anthropic-ai/sdk` de
 Tool call `arguments` are always a parsed object. **Do not put API keys in a public browser bundle** — use a BFF in production.
 
 Sketch: [`examples/llm-openai.ts`](../examples/llm-openai.ts).
+
+## Optional host session (`novel-engine/session`)
+
+Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, S3 ChapterRunner, S4 Worker bridge, and multi-book workspace. Guide: [session.md](session.md) ([中文](session.zh-CN.md)). Scenario: [README §7](../README.md#scenario-session) · [README §8](../README.md#scenario-session-worker).
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `createNovelSession({ store, llm?, bookId })` | fn | Same-thread session. `llm` required for S2 generate / auto-write and S3 `chapter.write`. |
+| `NovelSession` | type | Inspect + `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter` / `subscribe` / snapshot wrappers / `close`. |
+| `createNovelWorkspace({ createStore, llm?, indexStore? })` | fn | One store per `bookId`. Optional `indexStore` persists `_index.json`. |
+| `NovelWorkspace` | type | `createBook` / `open` / `switchTo` / `listBooks` / `close` / `currentBookId`. |
+| `createSessionClient(port, { bookId })` | fn | S4 main-thread `NovelSession` over messages. |
+| `attachSessionWorker(port, { createSession })` | fn | S4 worker adapter; `createSession` returns a same-thread `NovelSession`. |
+| `SESSION_PROTOCOL` / `SESSION_NS` / `isSessionCommand` / `isSessionNotice` | const / fn | Session protocol (`v: 1`, `ns: "session"`). |
+| `FoundationMeta` / `FoundationGap` / `InspectResult` / `PlanningInfo` | types | Inspect payload. Gaps include bilingual hints. |
+| `FoundationPatch` / `FoundationKey` / `FOUNDATION_KEYS` / `GenerateFoundationOptions` / `StartAutoWriteOptions` / `AutoWriteResult` / `SessionEvent` | types | S2 generate / auto-write. |
+| `ChapterRunner` / `ChapterView` / `ChapterWriteInput` / `ChapterWriteResult` / `ChapterWriteMode` / `CHAPTER_WRITE_MODES` | type / const | S3 ChapterRunner. Modes: `create` / `continue` / `rewrite` / `polish`. |
+| `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`. |
+| `SessionLlmRequiredError` / `FoundationGenerateError` | class | Missing `llm`; bad generate JSON / keys. |
+| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` already in flight (including over the bridge). |
+| `ChapterConflictError` / `ChapterRunnerError` | class | Chapter mode precondition; writer loop / `saveFinal` failure. |
+| `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | Closed session/workspace; unknown `bookId`. |
+| `WORKSPACE_INDEX_PATH` | const | `"_index.json"`. |
+
+`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). On the Worker bridge it runs **in the worker** (the book store lives there). `fill_missing` (default) only upserts keys that are still gaps. `chapter.write` is a dedicated writer loop (MockLlm `toolCalls`); it does not run `Engine.run` or drive `pendingRewrites`. Worker `LlmPort` should `fetch` a host BFF — **do not embed vendor keys**.
+
+Sketches: [`examples/session-workspace.ts`](../examples/session-workspace.ts) (same-thread) · [`examples/session-host.ts`](../examples/session-host.ts) (Worker).
 
 ## Worker host
 

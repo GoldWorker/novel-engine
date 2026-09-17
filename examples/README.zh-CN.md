@@ -18,6 +18,8 @@
 | [4. 嵌入 Web Worker](../README.zh-CN.md#scenario-worker) | [`engine.worker.ts`](engine.worker.ts) + [`worker-host.ts`](worker-host.ts) |
 | [5. 书稿快照导入导出](../README.zh-CN.md#scenario-snapshot) | [`snapshot-roundtrip.ts`](snapshot-roundtrip.ts) |
 | [6. 注入真实 LLM](../README.zh-CN.md#scenario-llm) | [`llm-openai.ts`](llm-openai.ts) |
+| [7. 宿主 Session](../README.zh-CN.md#scenario-session) | [`session-workspace.ts`](session-workspace.ts) |
+| [8. Worker 上的 Session](../README.zh-CN.md#scenario-session-worker) | [`session.worker.ts`](session.worker.ts) + [`session-host.ts`](session-host.ts) |
 
 Web Worker 嵌入需要 **两份**文件。把 Worker 文件里的 `LlmPort` 占位换成网关 / WebLLM，或把 `novel-engine/llm` 放在 BFF 后面。见 [docs/llm-adapters.zh-CN.md](../docs/llm-adapters.zh-CN.md)。
 

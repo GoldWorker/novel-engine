@@ -132,6 +132,18 @@ export class OpfsStore implements StorePort {
     return (await this.resolveFile(path, false)) !== null;
   }
 
+  async remove(path: string): Promise<void> {
+    try {
+      const { dir, name } = await this.resolveParent(path, false);
+      await dir.removeEntry(name);
+    } catch (err) {
+      if (isNotFound(err)) {
+        return;
+      }
+      throw err;
+    }
+  }
+
   /**
    * Sorted logical paths under the OPFS root, optionally filtered by prefix.
    * Skips atomic-write temp files (`.name.tmp`). When the directory handle
