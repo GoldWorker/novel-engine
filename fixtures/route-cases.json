@@ -1,0 +1,608 @@
+[
+  {
+    "name": "complete→null",
+    "state": {
+      "progress": {
+        "phase": "complete",
+        "flow": "writing",
+        "totalChapters": 10,
+        "completedChapters": [1, 2],
+        "pendingRewrites": [],
+        "layered": false
+      }
+    },
+    "expected": null
+  },
+  {
+    "name": "nil progress→null",
+    "state": {},
+    "expected": null
+  },
+  {
+    "name": "foundation missing→architect_short",
+    "state": {
+      "progress": {
+        "phase": "outline",
+        "flow": "writing",
+        "totalChapters": 0,
+        "completedChapters": [],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "foundationMissing": ["characters", "world_rules"],
+      "planningTier": "short"
+    },
+    "expected": {
+      "agent": "architect_short",
+      "task": "补齐基础设定与作品信息缺项：characters、world_rules；book 使用 save_book，其余基础设定使用 save_foundation 落盘",
+      "reason": "基础设定缺项未齐，照缺项续派同一规划师"
+    }
+  },
+  {
+    "name": "foundation missing→architect_long (mid)",
+    "state": {
+      "progress": {
+        "phase": "premise",
+        "flow": "writing",
+        "totalChapters": 0,
+        "completedChapters": [],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "foundationMissing": ["premise"],
+      "planningTier": "mid"
+    },
+    "expected": {
+      "agent": "architect_long",
+      "task": "补齐基础设定与作品信息缺项：premise；book 使用 save_book，其余基础设定使用 save_foundation 落盘",
+      "reason": "基础设定缺项未齐，照缺项续派同一规划师"
+    }
+  },
+  {
+    "name": "foundation missing book uses save_book",
+    "state": {
+      "progress": {
+        "phase": "outline",
+        "flow": "writing",
+        "totalChapters": 0,
+        "completedChapters": [],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "foundationMissing": ["book"],
+      "planningTier": "long"
+    },
+    "expected": {
+      "agent": "architect_long",
+      "task": "补齐基础设定与作品信息缺项：book；book 使用 save_book，其余基础设定使用 save_foundation 落盘",
+      "reason": "基础设定缺项未齐，照缺项续派同一规划师"
+    }
+  },
+  {
+    "name": "foundation_audit special task",
+    "state": {
+      "progress": {
+        "phase": "outline",
+        "flow": "writing",
+        "totalChapters": 0,
+        "completedChapters": [],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "foundationMissing": ["foundation_audit"],
+      "planningTier": "long"
+    },
+    "expected": {
+      "agent": "architect_long",
+      "task": "基础设定已齐全：重新调用 novel_context 读取全部已落盘工件与 foundation_status.fingerprint，审查跨文件语义一致性后调用 audit_foundation；有问题先修正并重新审查",
+      "reason": "基础设定缺项未齐，照缺项续派同一规划师"
+    }
+  },
+  {
+    "name": "foundation missing with empty tier→null",
+    "state": {
+      "progress": {
+        "phase": "outline",
+        "flow": "writing",
+        "totalChapters": 0,
+        "completedChapters": [],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "foundationMissing": ["characters"]
+    },
+    "expected": null
+  },
+  {
+    "name": "planning phase no missing→null",
+    "state": {
+      "progress": {
+        "phase": "outline",
+        "flow": "writing",
+        "totalChapters": 0,
+        "completedChapters": [],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "planningTier": "long",
+      "foundationMissing": []
+    },
+    "expected": null
+  },
+  {
+    "name": "pending rewrite→writer",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "rewriting",
+        "totalChapters": 10,
+        "completedChapters": [1, 2],
+        "pendingRewrites": [3, 5],
+        "layered": true
+      }
+    },
+    "expected": {
+      "agent": "writer",
+      "task": "重写第 3 章",
+      "reason": "PendingRewrites 队列剩余 2 章",
+      "chapter": 3
+    }
+  },
+  {
+    "name": "pending polish verb→writer",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "polishing",
+        "totalChapters": 10,
+        "completedChapters": [1],
+        "pendingRewrites": [2],
+        "layered": true
+      }
+    },
+    "expected": {
+      "agent": "writer",
+      "task": "打磨第 2 章",
+      "reason": "PendingRewrites 队列剩余 1 章",
+      "chapter": 2
+    }
+  },
+  {
+    "name": "reviewing→null",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "reviewing",
+        "totalChapters": 10,
+        "completedChapters": [1, 2],
+        "pendingRewrites": [],
+        "layered": true
+      }
+    },
+    "expected": null
+  },
+  {
+    "name": "steering→null",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "steering",
+        "totalChapters": 10,
+        "completedChapters": [1],
+        "pendingRewrites": [],
+        "layered": true
+      }
+    },
+    "expected": null
+  },
+  {
+    "name": "arc-end missing review→editor",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 30,
+        "completedChapters": [10],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "lastCompleted": 10,
+      "arcBoundary": {
+        "isArcEnd": true,
+        "isVolumeEnd": false,
+        "volume": 1,
+        "arc": 2,
+        "startChapter": 11,
+        "endChapter": 22,
+        "nextVolume": 0,
+        "nextArc": 0,
+        "needsExpansion": false,
+        "needsNewVolume": false
+      }
+    },
+    "expected": {
+      "agent": "editor",
+      "task": "对第 1 卷第 2 弧（第 11-22 章）做弧级评审：调用 novel_context(chapter=22)，save_review 使用 scope=arc、chapter=22；issues[].chapters 只能落在该区间",
+      "reason": "弧末评审未完成"
+    }
+  },
+  {
+    "name": "arc-end has review needs summary→editor",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 30,
+        "completedChapters": [10],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "lastCompleted": 10,
+      "hasArcReview": true,
+      "arcBoundary": {
+        "isArcEnd": true,
+        "isVolumeEnd": false,
+        "volume": 1,
+        "arc": 2,
+        "startChapter": 0,
+        "endChapter": 0,
+        "nextVolume": 0,
+        "nextArc": 0,
+        "needsExpansion": false,
+        "needsNewVolume": false
+      }
+    },
+    "expected": {
+      "agent": "editor",
+      "task": "生成第 1 卷第 2 弧摘要、角色快照与写作规则（save_arc_summary）",
+      "reason": "弧摘要未完成"
+    }
+  },
+  {
+    "name": "volume-end needs volume summary→editor",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 40,
+        "completedChapters": [20],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "lastCompleted": 20,
+      "hasArcReview": true,
+      "hasArcSummary": true,
+      "arcBoundary": {
+        "isArcEnd": true,
+        "isVolumeEnd": true,
+        "volume": 1,
+        "arc": 3,
+        "startChapter": 0,
+        "endChapter": 0,
+        "nextVolume": 0,
+        "nextArc": 0,
+        "needsExpansion": false,
+        "needsNewVolume": false
+      }
+    },
+    "expected": {
+      "agent": "editor",
+      "task": "生成第 1 卷卷摘要（save_volume_summary）",
+      "reason": "卷摘要未完成"
+    }
+  },
+  {
+    "name": "needs arc expansion→architect_long",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 40,
+        "completedChapters": [10],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "lastCompleted": 10,
+      "hasArcReview": true,
+      "hasArcSummary": true,
+      "arcBoundary": {
+        "isArcEnd": true,
+        "isVolumeEnd": false,
+        "volume": 1,
+        "arc": 2,
+        "startChapter": 0,
+        "endChapter": 0,
+        "nextVolume": 1,
+        "nextArc": 3,
+        "needsExpansion": true,
+        "needsNewVolume": false
+      }
+    },
+    "expected": {
+      "agent": "architect_long",
+      "task": "展开第 1 卷第 3 弧（expand_next_arc）",
+      "reason": "下一弧骨架待展开"
+    }
+  },
+  {
+    "name": "needs new volume→architect_long",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 40,
+        "completedChapters": [30],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "lastCompleted": 30,
+      "hasArcReview": true,
+      "hasArcSummary": true,
+      "hasVolumeSummary": true,
+      "arcBoundary": {
+        "isArcEnd": true,
+        "isVolumeEnd": true,
+        "volume": 2,
+        "arc": 4,
+        "startChapter": 0,
+        "endChapter": 0,
+        "nextVolume": 0,
+        "nextArc": 0,
+        "needsExpansion": false,
+        "needsNewVolume": true
+      }
+    },
+    "expected": {
+      "agent": "architect_long",
+      "task": "创建下一卷：按完结判定清单评估后调用 save_foundation——故事继续 → type=append_volume；故事接近终点 → type=append_volume 且卷 JSON 顶层带 \"final\": true（收官卷，整卷收线，写完自动完结）；全部完结条件当下已满足 → type=complete_book。三选一均须附 reason 参数写明判定理由",
+      "reason": "卷末需决定追加新卷、收官卷或结束全书"
+    }
+  },
+  {
+    "name": "default next chapter→writer",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 20,
+        "completedChapters": [1, 2, 3],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "lastCompleted": 3
+    },
+    "expected": {
+      "agent": "writer",
+      "task": "写第 4 章",
+      "reason": "续写下一章",
+      "chapter": 4
+    }
+  },
+  {
+    "name": "immediate feedback→architect_short",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 20,
+        "completedChapters": [1, 2, 3],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "lastCompleted": 3,
+      "planningTier": "short",
+      "immediateFeedbackCount": 2
+    },
+    "expected": {
+      "agent": "architect_short",
+      "task": "仅处理 novel_context 中的外部修订 writer_feedback：核对已发生剧情与后续计划，需要调整时调用 revise_outline 或相应结构工具，无需调整时调用 resolve_outline_feedback；不得处理 foundation_status 或其它规划，落盘后用一句话结束",
+      "reason": "有 2 条外部修订影响尚未传播到后续规划"
+    }
+  },
+  {
+    "name": "aggregate refresh precedes immediate feedback→editor",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 10,
+        "completedChapters": [1, 2],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "immediateFeedbackCount": 1,
+      "aggregateRefresh": {
+        "kind": "arc_summary",
+        "volume": 1,
+        "arc": 1,
+        "startChapter": 1,
+        "endChapter": 2
+      }
+    },
+    "expected": {
+      "agent": "editor",
+      "task": "生成第 1 卷第 1 弧摘要、角色快照与写作规则（save_arc_summary）",
+      "reason": "弧级摘要缺失"
+    }
+  },
+  {
+    "name": "aggregate arc review→editor",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 10,
+        "completedChapters": [1, 2],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "aggregateRefresh": {
+        "kind": "arc_review",
+        "volume": 1,
+        "arc": 2,
+        "startChapter": 3,
+        "endChapter": 8
+      }
+    },
+    "expected": {
+      "agent": "editor",
+      "task": "审阅第 1 卷第 2 弧（第 3-8 章）：调用 novel_context(chapter=8)，save_review 使用 scope=arc、chapter=8",
+      "reason": "弧级审阅缺失"
+    }
+  },
+  {
+    "name": "aggregate volume summary→editor",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 10,
+        "completedChapters": [1, 2],
+        "pendingRewrites": [],
+        "layered": true
+      },
+      "aggregateRefresh": {
+        "kind": "volume_summary",
+        "volume": 2,
+        "arc": 0,
+        "startChapter": 0,
+        "endChapter": 0
+      }
+    },
+    "expected": {
+      "agent": "editor",
+      "task": "生成第 2 卷卷摘要（save_volume_summary）",
+      "reason": "卷摘要缺失"
+    }
+  },
+  {
+    "name": "aggregate global review→editor",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 20,
+        "completedChapters": [1, 2, 3, 4, 5],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "aggregateRefresh": {
+        "kind": "global_review",
+        "volume": 0,
+        "arc": 0,
+        "startChapter": 0,
+        "endChapter": 5
+      }
+    },
+    "expected": {
+      "agent": "editor",
+      "task": "审阅前 5 章：调用 novel_context(chapter=5)，save_review 使用 scope=global、chapter=5",
+      "reason": "全局审阅缺失"
+    }
+  },
+  {
+    "name": "non-layered outline exhausted→architect_short",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 3,
+        "completedChapters": [1, 2, 3],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "lastCompleted": 3,
+      "planningTier": "short",
+      "hasGlobalReview": true
+    },
+    "expected": {
+      "agent": "architect_short",
+      "task": "非分层大纲已写完（已完成 3 章，共 3 章）：若故事已收束，调用 save_foundation(type=complete_book)；若仍需继续，用 revise_outline 从第 4 章续接后续计划",
+      "reason": "非分层大纲已耗尽，需决定完结或续接"
+    }
+  },
+  {
+    "name": "non-layered arc boundary ignored→writer",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 20,
+        "completedChapters": [10],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "lastCompleted": 10,
+      "arcBoundary": {
+        "isArcEnd": true,
+        "isVolumeEnd": false,
+        "volume": 1,
+        "arc": 2,
+        "startChapter": 1,
+        "endChapter": 10,
+        "nextVolume": 0,
+        "nextArc": 0,
+        "needsExpansion": false,
+        "needsNewVolume": false
+      }
+    },
+    "expected": {
+      "agent": "writer",
+      "task": "写第 11 章",
+      "reason": "续写下一章",
+      "chapter": 11
+    }
+  },
+  {
+    "name": "non-layered global review due→editor",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "writing",
+        "totalChapters": 20,
+        "completedChapters": [1, 2, 3, 4, 5],
+        "pendingRewrites": [],
+        "layered": false
+      },
+      "lastCompleted": 5,
+      "hasGlobalReview": false
+    },
+    "expected": {
+      "agent": "editor",
+      "task": "对前 5 章做全局审阅（save_review scope=global, chapter=5）",
+      "reason": "已完成 5 章，触发全局审阅"
+    }
+  },
+  {
+    "name": "rewrites beat arc-end review",
+    "state": {
+      "progress": {
+        "phase": "writing",
+        "flow": "rewriting",
+        "totalChapters": 30,
+        "completedChapters": [10],
+        "pendingRewrites": [8],
+        "layered": true
+      },
+      "lastCompleted": 10,
+      "arcBoundary": {
+        "isArcEnd": true,
+        "isVolumeEnd": false,
+        "volume": 1,
+        "arc": 1,
+        "startChapter": 1,
+        "endChapter": 10,
+        "nextVolume": 0,
+        "nextArc": 0,
+        "needsExpansion": false,
+        "needsNewVolume": false
+      }
+    },
+    "expected": {
+      "agent": "writer",
+      "task": "重写第 8 章",
+      "reason": "PendingRewrites 队列剩余 1 章",
+      "chapter": 8
+    }
+  }
+]
