@@ -105,6 +105,16 @@ describe("OpfsStore CRUD (in-memory OPFS shim)", () => {
 });
 
 describe("OpfsStore atomicWrite", () => {
+  it("lists nested files and skips leftover temp names", async () => {
+    const fake = createFakeOpfs();
+    const store = await OpfsStore.open({ root: fake.root, directory: "" });
+    await store.write("drafts/01.draft.md", "草稿");
+    await fake.root.getFileHandle(".chapter.md.tmp", { create: true });
+    const listed = await store.list();
+    expect(listed).toEqual(["drafts/01.draft.md"]);
+    expect(await store.list("drafts/")).toEqual(["drafts/01.draft.md"]);
+  });
+
   it("replaces the destination via temp + move", async () => {
     const fake = createFakeOpfs({ supportMove: true });
     const store = await OpfsStore.open({ root: fake.root, directory: "" });

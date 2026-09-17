@@ -15,6 +15,15 @@ export type {
 export { PATHS, padChapter, chapterPlanPath, chapterDraftPath, chapterFinalPath, globalReviewPath, arcReviewPath, chapterSummaryPath, arcSummaryPath, volumeSummaryPath } from "./paths.js";
 export { readJson, writeJson, readText, writeText, readJsonl } from "./io.js";
 export { assembleState } from "./state.js";
+export {
+  exportBookSnapshot,
+  importBookSnapshot,
+  SnapshotError,
+  BOOK_SNAPSHOT_FORMAT,
+  BOOK_SNAPSHOT_VERSION,
+  BOOK_SNAPSHOT_MANIFEST_PATH,
+} from "./snapshot.js";
+export type { BookSnapshotManifest } from "./snapshot.js";
 export { assembleNovelContext, SLIDING_SUMMARY_WINDOW } from "./context.js";
 export {
   flattenOutline,

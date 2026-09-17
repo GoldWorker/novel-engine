@@ -50,6 +50,12 @@ export {
   createOpfsStore,
   isOpfsAvailable,
   OpfsUnavailableError,
+  exportBookSnapshot,
+  importBookSnapshot,
+  SnapshotError,
+  BOOK_SNAPSHOT_FORMAT,
+  BOOK_SNAPSHOT_VERSION,
+  BOOK_SNAPSHOT_MANIFEST_PATH,
   PATHS,
   readJson,
   writeJson,
@@ -69,6 +75,7 @@ export {
   globalReviewPath,
 } from "./store/index.js";
 export type {
+  BookSnapshotManifest,
   BookMetadata,
   OutlineEntry,
   VolumeOutline,

@@ -45,8 +45,18 @@ export {
   createOpfsStore,
   isOpfsAvailable,
   OpfsUnavailableError,
+  exportBookSnapshot,
+  importBookSnapshot,
+  SnapshotError,
+  BOOK_SNAPSHOT_FORMAT,
+  BOOK_SNAPSHOT_VERSION,
+  BOOK_SNAPSHOT_MANIFEST_PATH,
 } from "./store/index.js";
-export type { OpfsStoreOptions, CreateOpfsStoreOptions } from "./store/index.js";
+export type {
+  OpfsStoreOptions,
+  CreateOpfsStoreOptions,
+  BookSnapshotManifest,
+} from "./store/index.js";
 
 export { MockLlm, ReplayLlm } from "./llm/index.js";
 export type { StorePort, LlmPort } from "./ports/index.js";

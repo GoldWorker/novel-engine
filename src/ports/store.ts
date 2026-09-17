@@ -18,4 +18,10 @@ export interface StorePort {
   /** Write bytes or UTF-8 text to a logical path. */
   write(path: string, data: Uint8Array | string): Promise<void>;
   has(path: string): Promise<boolean>;
+  /**
+   * Optional path listing. `MemoryStore` and `OpfsStore` implement this so
+   * `exportBookSnapshot` can pack every artifact. Custom adapters may omit it;
+   * export then probes the known book layout via `has()`.
+   */
+  list?(prefix?: string): readonly string[] | Promise<readonly string[]>;
 }

@@ -1,0 +1,34 @@
+{
+  "meta/progress.json": {
+    "phase": "writing",
+    "flow": "writing",
+    "currentChapter": 2,
+    "totalChapters": 3,
+    "completedChapters": [1],
+    "pendingRewrites": [],
+    "layered": false
+  },
+  "meta/book.json": {
+    "title": "无主的信",
+    "synopsis": "灯塔看守人在风暴后捡到一封没有寄信人的信。"
+  },
+  "meta/run_meta.json": {
+    "planningTier": "short",
+    "startPrompt": "写一本三章短篇：灯塔看守人在风暴后捡到一封没有寄信人的信。"
+  },
+  "premise.md": "孤僻的灯塔看守人林守在风暴后的礁石上捡到一封没有寄信人的信。",
+  "outline.json": [
+    { "chapter": 1, "title": "风暴之后" },
+    { "chapter": 2, "title": "岸边的地址" },
+    { "chapter": 3, "title": "回信" }
+  ],
+  "characters.json": [{ "name": "林守", "role": "主角" }],
+  "world_rules.json": [{ "name": "信与潮", "description": "涨潮来信，退潮回信。" }],
+  "drafts/02.plan.json": { "chapter": 2, "title": "岸边的地址", "beats": ["空屋", "时刻表"] },
+  "chapters/01.md": "# 风暴之后\n\n蜡封的瓶子卡在礁石缝里。\n",
+  "summaries/01.json": {
+    "chapter": 1,
+    "title": "风暴之后",
+    "summary": "林守捡到没有寄信人的信。"
+  }
+}

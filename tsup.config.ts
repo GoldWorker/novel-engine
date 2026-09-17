@@ -13,4 +13,6 @@ export default defineConfig({
   treeshake: true,
   target: "es2022",
   outDir: "dist",
+  // Keep fflate out of the bundle so hosts resolve the browser export from node_modules.
+  external: ["fflate", "fflate/browser"],
 });
