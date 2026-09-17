@@ -17,8 +17,9 @@
 | [3. 浏览器持久化（OPFS）](../README.zh-CN.md#scenario-opfs) | [`opfs-store.ts`](opfs-store.ts) |
 | [4. 嵌入 Web Worker](../README.zh-CN.md#scenario-worker) | [`engine.worker.ts`](engine.worker.ts) + [`worker-host.ts`](worker-host.ts) |
 | [5. 书稿快照导入导出](../README.zh-CN.md#scenario-snapshot) | [`snapshot-roundtrip.ts`](snapshot-roundtrip.ts) |
+| [6. 注入真实 LLM](../README.zh-CN.md#scenario-llm) | [`llm-openai.ts`](llm-openai.ts) |
 
-Web Worker 嵌入需要 **两份**文件。把 Worker 文件里的 `LlmPort` 占位换成你的网关 / WebLLM 适配器。
+Web Worker 嵌入需要 **两份**文件。把 Worker 文件里的 `LlmPort` 占位换成网关 / WebLLM，或把 `novel-engine/llm` 放在 BFF 后面。见 [docs/llm-adapters.zh-CN.md](../docs/llm-adapters.zh-CN.md)。
 
 本仓库可选类型检查（把 `novel-engine` 映射到 `src/`）：
 

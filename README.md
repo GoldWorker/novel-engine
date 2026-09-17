@@ -4,19 +4,19 @@
 
 Reusable **TypeScript** Novel Engine SDK for hosts that want to generate novels in the browser (or Node tests). Pure ESM, no UI, no React bindings, no TUI.
 
-**0.1.0** is the first usable semver: Engine + `route` + MemoryStore / OpfsStore + MockLlm + Worker host + book snapshot zip.
+**0.2.0** adds an optional `novel-engine/llm` entry (fetch adapters for OpenAI, Anthropic, DashScope). Default bundles still ship no vendor clients.
 
-This package never talks to a real model and never uses `node:fs` / `node:path` in `src/`.
+The default `novel-engine` / `novel-engine/worker` entries never talk to a real model. `src/` never uses `node:fs` / `node:path`.
 
 Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli) (`internal/flow/router.go`, `internal/host/engine.go`).
 
 Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)).
 
-**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot). Runnable sources stay in [`examples/`](examples/).
+**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm). Runnable sources stay in [`examples/`](examples/).
 
 ## What's not included
 
-- Real LLM provider clients (OpenAI, WebLLM, …) — inject `LlmPort`
+- Vendor LLM clients in the default `novel-engine` / `novel-engine/worker` bundles — inject `LlmPort`, or import optional [`novel-engine/llm`](docs/llm-adapters.md) (fetch adapters; **do not put API keys in a public browser app**)
 - React package, Demo SPA, or any visual app
 - Arbiter full semantic scenes (`plan_start` is a keyword stub)
 - ChapterAdvanceGate review-mode UI
@@ -41,7 +41,7 @@ Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)).
 
 - **`route` is a pure function.** Input is an explicit `State` snapshot. It performs no IO and does not call `StorePort` or `LlmPort`.
 - **`StorePort`** loads that snapshot and persists artifacts. Hosts inject `MemoryStore`, `OpfsStore`, IndexedDB, or Node fs *outside* this library.
-- **`LlmPort`** runs architect / writer / editor completions (optional structured `toolCalls`). The library ships `MockLlm` / `ReplayLlm` only.
+- **`LlmPort`** runs architect / writer / editor completions (optional structured `toolCalls`). Default entries ship `MockLlm` / `ReplayLlm` only. Optional fetch adapters: `novel-engine/llm`.
 
 ## Install
 
@@ -55,6 +55,7 @@ Package exports:
 | --- | --- | --- |
 | `.` | `novel-engine` | Engine, stores, client, mocks, snapshot, `route` |
 | `./worker` | `novel-engine/worker` | `attachEngineWorker` + Engine/stores for a dedicated worker |
+| `./llm` | `novel-engine/llm` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope) |
 
 Published `files`: `dist/`, `README.md`, `LICENSE`.
 
@@ -71,6 +72,7 @@ Scenarios compose: the Worker example already calls `createOpfsStore()`; snapsho
 | [3. Persist in the browser (OPFS)](#scenario-opfs) | Keep artifacts across reloads with Origin Private File System; fall back to ephemeral `MemoryStore` when OPFS is missing. | [`examples/opfs-store.ts`](examples/opfs-store.ts) |
 | [4. Embed in a Web Worker](#scenario-worker) | Dedicated worker + main-thread client: `start` / `steer` / `pause` / `resume` / `snapshot`. | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. Book snapshot export / import](#scenario-snapshot) | Zip every store path (fflate) and merge-restore into another `StorePort`. | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
+| [6. Inject a real LLM](#scenario-llm) | Host-side OpenAI / Anthropic / DashScope `LlmPort` via optional `novel-engine/llm`. Keys belong on a BFF. | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
 
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
 
@@ -201,7 +203,7 @@ export async function openOrThrow(): Promise<StorePort> {
 
 **When:** The Engine loop should not block the UI thread. Pair a dedicated worker module with a main-thread client.
 
-The worker bundle is a **separate entry** so bundlers can tree-shake the main-thread client out of the worker (and vice versa). Host-owned worker file: inject your `LlmPort` there (this library never ships a provider client). `MockLlm.fromHandler` also works inside the worker — see scenario 1.
+The worker bundle is a **separate entry** so bundlers can tree-shake the main-thread client out of the worker (and vice versa). Host-owned worker file: inject your `LlmPort` there. Default entries do not ship a provider client; optional fetch adapters are `novel-engine/llm` (prefer a BFF in production — see scenario 6). `MockLlm.fromHandler` also works inside the worker — see scenario 1.
 
 `pause` / `steer` take effect **after the current Worker instruction**, not mid-tool. `steer` records a decision and sets `flow=steering` so `route` returns null until `resume()` restores the previous flow.
 
@@ -217,7 +219,7 @@ import type { LlmPort } from "novel-engine/worker";
 
 const llm: LlmPort = {
   async complete() {
-    // gateway / WebLLM — this library does not ship a provider client
+    // gateway / WebLLM / novel-engine/llm behind a BFF — see scenario 6
     return { text: "", toolCalls: [] };
   },
 };
@@ -296,6 +298,34 @@ try {
 // BOOK_SNAPSHOT_VERSION === 1
 ```
 
+<a id="scenario-llm"></a>
+
+### 6. Inject a real LLM (`novel-engine/llm`)
+
+**When:** A trusted Node host, Electron, or a **server BFF** needs a real `LlmPort`. Not for shipping raw API keys in a public SPA.
+
+Optional subpath. Fetch-based OpenAI, Anthropic, and DashScope (OpenAI-compatible `compatible-mode/v1`) adapters. No `openai` / `@anthropic-ai/sdk` packages. DashScope reuses the OpenAI-shaped client with a DashScope base URL + Bearer key.
+
+**Security:** browsers that call vendors directly expose the key. Production (including a Next.js workbench) should keep keys on a BFF and have the worker call that route.
+
+Details: [docs/llm-adapters.md](docs/llm-adapters.md) ([中文](docs/llm-adapters.zh-CN.md)). Sketch: [`examples/llm-openai.ts`](examples/llm-openai.ts).
+
+```ts
+import { createEngine, MemoryStore } from "novel-engine";
+import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
+
+const llm = createOpenAiLlm({
+  apiKey: "sk-replace-me", // BFF / trusted host env — never a public SPA
+  model: "gpt-4o-mini",
+});
+// createAnthropicLlm({ apiKey, model: "claude-sonnet-4-20250514" })
+// createDashScopeLlm({ apiKey, model: "qwen-plus" })
+// createVendorLlm({ provider: "dashscope", apiKey, model: "qwen-plus" })
+
+const engine = createEngine({ store: new MemoryStore(), llm });
+await engine.run({ prompt: "写一本三章短篇：……" });
+```
+
 ## How `route` decides
 
 Priority is first-match, matching ainovel-cli `internal/flow/router.go`:
@@ -335,6 +365,7 @@ import {
 } from "novel-engine";
 
 import { attachEngineWorker } from "novel-engine/worker";
+import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 ```
 
 See [docs/api.md](docs/api.md) for the stable surface (domain types, Worker protocol, snapshot constants).
@@ -351,7 +382,7 @@ npm run build
 npx tsc -p tsconfig.examples.json
 ```
 
-Tests use **mock fixtures only** — no network, no providers, no real OPFS.
+Tests use **mock fixtures only** — no network, no live providers, no real OPFS. Vendor adapter suites mock `fetch`.
 
 Hand-authored JSON fixtures live in `fixtures/`:
 

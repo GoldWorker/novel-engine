@@ -1,10 +1,10 @@
-# novel-engine API（0.1.0）
+# novel-engine API（0.2.0）
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
 宿主应用的稳定面。除非另有说明，一律从 `novel-engine` 导入。发布包只包含 `dist/`、`README.md` 和 `LICENSE`。
 
-本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、真实 LLM 供应商、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。`src/` 从不导入 `node:fs` / `node:path`。
+本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。默认入口（`.` / `./worker`）不打包供应商 LLM 客户端。可选 fetch 适配器：[`novel-engine/llm`](llm-adapters.zh-CN.md)。`src/` 从不导入 `node:fs` / `node:path`。
 
 宿主怎么用按场景写在 [根目录 README](../README.zh-CN.md#使用场景)（[English](../README.md#usage-by-scenario)）。可跑通的源码在 [`examples/`](../examples/)。
 
@@ -14,10 +14,12 @@
 | --- | --- | --- |
 | `.` | `dist/index.js` | Engine、`route`、领域类型、stores、mocks、主线程 client、书籍快照 |
 | `./worker` | `dist/worker.js` | `attachEngineWorker`，以及供专用 Worker 使用的 Engine / stores / snapshot |
+| `./llm` | `dist/llm.js` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope）。不会打进 `.` 或 `./worker`。 |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
 import { attachEngineWorker } from "novel-engine/worker";
+import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 ```
 
 ## Engine（引擎）
@@ -71,7 +73,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 | `LlmPort` | type | `complete(request) → { text, toolCalls? }`。 |
 | `LlmCompletionRequest` / `LlmCompletionResult` / `LlmToolCall` / `LlmMessage` / `LlmToolSpec` / `LlmRole` | types | 补全线路类型。 |
 
-宿主针对网关或 WebLLM 实现 `LlmPort`。本包从不附带供应商客户端。
+宿主针对网关或 WebLLM 实现 `LlmPort`，或从 [`novel-engine/llm`](llm-adapters.zh-CN.md) 导入可选 fetch 适配器。默认入口从不附带供应商客户端。**不要把原始 API Key 放进公开浏览器应用。**
 
 ## Stores（存储）
 
@@ -113,6 +115,24 @@ Zip 由 [fflate](https://github.com/101arrowz/fflate)（浏览器构建）生成
 | `MockLlmStep` / `MockLlmHandler` | types | 脚本条目。 |
 
 测试以及短篇/分层 mock 书只用这些——没有在线供应商。
+
+## 可选供应商 LLM（`novel-engine/llm`）
+
+不属于 `.` 或 `./worker`。基于 fetch；无 `openai` / `@anthropic-ai/sdk` 依赖。指南：[llm-adapters.zh-CN.md](llm-adapters.zh-CN.md)（[English](llm-adapters.md)）。场景：[README §6](../README.zh-CN.md#scenario-llm)。
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `createOpenAiLlm(options)` | fn | Chat Completions。默认 base `https://api.openai.com/v1`。 |
+| `createAnthropicLlm(options)` | fn | Messages API。默认 base `https://api.anthropic.com`。`maxTokens` 默认 4096。 |
+| `createDashScopeLlm(options)` | fn | DashScope 的 OpenAI 兼容模式（`compatible-mode/v1`）。复用 OpenAI 客户端。 |
+| `createVendorLlm({ provider, ... })` | fn | `provider`：`"openai"` \| `"anthropic"` \| `"dashscope"`。 |
+| `LlmAdapterError` | class | HTTP / 映射失败（`status?`、`body?`）。 |
+| `OPENAI_DEFAULT_BASE_URL` / `ANTHROPIC_DEFAULT_BASE_URL` / `DASHSCOPE_COMPAT_BASE_URL` | const | 文档化的默认值。 |
+| `LlmAdapterOptions` / `OpenAiLlmOptions` / `AnthropicLlmOptions` / `DashScopeLlmOptions` / `VendorLlmOptions` / `LlmVendor` / `FetchLike` | types | `apiKey`、`model`，可选 `baseUrl`、`fetch`、`headers`。 |
+
+tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放进公开浏览器包**——生产请走 BFF。
+
+示意：[`examples/llm-openai.ts`](../examples/llm-openai.ts)。
 
 ## Worker 宿主
 

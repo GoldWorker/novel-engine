@@ -4,19 +4,19 @@
 
 可复用的 **TypeScript** 小说引擎 SDK，给想在浏览器（或 Node 测试）里生成小说的宿主（host）使用。纯 ESM，无 UI、无 React 绑定、无 TUI。
 
-**0.1.0** 是第一个可用的 semver：Engine（引擎）+ `route`（Route，纯路由函数）+ MemoryStore / OpfsStore + MockLlm + Worker 宿主 + 书籍快照 zip。
+**0.2.0** 增加可选入口 `novel-engine/llm`（OpenAI / Anthropic / DashScope 的 fetch 适配器）。默认包仍然不含供应商客户端。
 
-本包从不连接真实模型，`src/` 中也从不使用 `node:fs` / `node:path`。
+默认的 `novel-engine` / `novel-engine/worker` 从不连接真实模型。`src/` 中也从不使用 `node:fs` / `node:path`。
 
 路由模型受 [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli)（`internal/flow/router.go`、`internal/host/engine.go`）启发。
 
 稳定导出见 [docs/api.zh-CN.md](docs/api.zh-CN.md)（[English API](docs/api.md)）。
 
-**怎么用？** 先看 [使用场景](#使用场景) — [短篇完结](#scenario-short-book) · [分层中长篇](#scenario-layered-book) · [浏览器持久化](#scenario-opfs) · [Web Worker](#scenario-worker) · [书稿快照](#scenario-snapshot)。可跑通的源码在 [`examples/`](examples/)。
+**怎么用？** 先看 [使用场景](#使用场景) — [短篇完结](#scenario-short-book) · [分层中长篇](#scenario-layered-book) · [浏览器持久化](#scenario-opfs) · [Web Worker](#scenario-worker) · [书稿快照](#scenario-snapshot) · [真实 LLM 适配器](#scenario-llm)。可跑通的源码在 [`examples/`](examples/)。
 
 ## 不包含什么
 
-- 真实 LLM 供应商客户端（OpenAI、WebLLM 等）——请自行注入 `LlmPort`
+- 默认 `novel-engine` / `novel-engine/worker` 包里的供应商 LLM 客户端——请自行注入 `LlmPort`，或导入可选的 [`novel-engine/llm`](docs/llm-adapters.zh-CN.md)（fetch 适配器；**不要把 API Key 放进公开浏览器应用**）
 - React 包、Demo SPA 或任何可视化应用
 - Arbiter（仲裁器）完整语义场景（`plan_start` 只是关键词桩）
 - ChapterAdvanceGate 审阅模式 UI
@@ -41,7 +41,7 @@
 
 - **`route` 是纯函数。** 输入是显式的 `State` 快照。它不做 IO，也不调用 `StorePort` 或 `LlmPort`。
 - **`StorePort`（存储端口）** 加载该快照并持久化产物。宿主注入 `MemoryStore`、`OpfsStore`、IndexedDB，或在本库外部实现 Node fs。
-- **`LlmPort`（LLM 端口）** 执行 architect / writer / editor 补全（可选结构化 `toolCalls`）。本库只附带 `MockLlm` / `ReplayLlm`。
+- **`LlmPort`（LLM 端口）** 执行 architect / writer / editor 补全（可选结构化 `toolCalls`）。默认入口只附带 `MockLlm` / `ReplayLlm`。可选 fetch 适配器：`novel-engine/llm`。
 
 ## 安装
 
@@ -55,6 +55,7 @@ npm install novel-engine
 | --- | --- | --- |
 | `.` | `novel-engine` | Engine、stores、client、mocks、snapshot、`route` |
 | `./worker` | `novel-engine/worker` | `attachEngineWorker` + Engine/stores，供专用 Worker 使用 |
+| `./llm` | `novel-engine/llm` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope） |
 
 发布的 `files`：`dist/`、`README.md`、`LICENSE`。
 
@@ -71,6 +72,7 @@ npm install novel-engine
 | [3. 浏览器持久化（OPFS）](#scenario-opfs) | 用 Origin Private File System 让产物在刷新后还在；没有 OPFS 时回落到临时的 `MemoryStore`。 | [`examples/opfs-store.ts`](examples/opfs-store.ts) |
 | [4. 嵌入 Web Worker](#scenario-worker) | 专用 Worker + 主线程 client：`start` / `steer` / `pause` / `resume` / `snapshot`。 | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. 书稿快照导入导出](#scenario-snapshot) | 把 store 中每个路径打成 zip（fflate），再 merge 进另一个 `StorePort`。 | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
+| [6. 注入真实 LLM](#scenario-llm) | 宿主侧通过可选的 `novel-engine/llm` 得到 OpenAI / Anthropic / DashScope 的 `LlmPort`。密钥放在 BFF。 | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
 
 `plan_start` 是**确定性桩**（无 Arbiter LLM）：提示词含 `长篇` 则选 `architect_long` / `long`；含 `中篇` 或 `分层` 则选 `architect_long` / `mid`；否则 `architect_short` / `short`。Worker 失败会重试一次，然后暂停。同一条 Route 指令连续五次也会暂停（死锁上限）。
 
@@ -201,7 +203,7 @@ export async function openOrThrow(): Promise<StorePort> {
 
 **何时：** Engine 循环不应卡住 UI 线程。把专用 Worker 模块和主线程 client 配对。
 
-Worker 包是**独立入口**，便于打包器把主线程 client 从 Worker 里 treeshake 掉（反之亦然）。Worker 文件由宿主持有：在此注入你的 `LlmPort`（本库不附带供应商客户端）。Worker 里也可以用 `MockLlm.fromHandler`——见场景 1。
+Worker 包是**独立入口**，便于打包器把主线程 client 从 Worker 里 treeshake 掉（反之亦然）。Worker 文件由宿主持有：在此注入你的 `LlmPort`。默认入口不附带供应商客户端；可选 fetch 适配器是 `novel-engine/llm`（生产请走 BFF——见场景 6）。Worker 里也可以用 `MockLlm.fromHandler`——见场景 1。
 
 `pause` / `steer` 在**当前 Worker 指令结束之后**生效，不会打断正在执行的工具。`steer` 会记录一条决策并把 `flow=steering`，于是 `route` 返回 null，直到 `resume()` 恢复之前的 flow。
 
@@ -217,7 +219,7 @@ import type { LlmPort } from "novel-engine/worker";
 
 const llm: LlmPort = {
   async complete() {
-    // gateway / WebLLM — 本库不附带供应商客户端
+    // gateway / WebLLM / novel-engine/llm 走 BFF — 见场景 6
     return { text: "", toolCalls: [] };
   },
 };
@@ -296,6 +298,34 @@ try {
 // BOOK_SNAPSHOT_VERSION === 1
 ```
 
+<a id="scenario-llm"></a>
+
+### 6. 注入真实 LLM（`novel-engine/llm`）
+
+**何时：** 受信任的 Node 宿主、Electron，或 **服务端 BFF** 需要真实 `LlmPort`。不要把原始 API Key 打进公开 SPA。
+
+可选子路径。基于 fetch 的 OpenAI、Anthropic、DashScope（OpenAI 兼容的 `compatible-mode/v1`）适配器。无 `openai` / `@anthropic-ai/sdk` 包。DashScope 复用 OpenAI 形态的客户端，使用 DashScope 的 base URL + Bearer 密钥。
+
+**安全：** 浏览器直连供应商会暴露密钥。生产（包括 Next.js 工作台）应把密钥放在 BFF，让 Worker 只访问该路由。
+
+详情：[docs/llm-adapters.zh-CN.md](docs/llm-adapters.zh-CN.md)（[English](docs/llm-adapters.md)）。示意：[`examples/llm-openai.ts`](examples/llm-openai.ts)。
+
+```ts
+import { createEngine, MemoryStore } from "novel-engine";
+import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
+
+const llm = createOpenAiLlm({
+  apiKey: "sk-replace-me", // BFF / 受信任宿主环境变量 — 不要放进公开 SPA
+  model: "gpt-4o-mini",
+});
+// createAnthropicLlm({ apiKey, model: "claude-sonnet-4-20250514" })
+// createDashScopeLlm({ apiKey, model: "qwen-plus" })
+// createVendorLlm({ provider: "dashscope", apiKey, model: "qwen-plus" })
+
+const engine = createEngine({ store: new MemoryStore(), llm });
+await engine.run({ prompt: "写一本三章短篇：……" });
+```
+
 ## `route` 如何决策
 
 优先级为先匹配先返回，对齐 ainovel-cli 的 `internal/flow/router.go`：
@@ -335,6 +365,7 @@ import {
 } from "novel-engine";
 
 import { attachEngineWorker } from "novel-engine/worker";
+import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 ```
 
 稳定面（领域类型、Worker 协议、快照常量）见 [docs/api.zh-CN.md](docs/api.zh-CN.md)。
@@ -351,7 +382,7 @@ npm run build
 npx tsc -p tsconfig.examples.json
 ```
 
-测试**只用 mock 夹具**——无网络、无供应商、无真实 OPFS。
+测试**只用 mock 夹具**——无网络、无在线供应商、无真实 OPFS。供应商适配器测试会 mock `fetch`。
 
 手写 JSON 夹具在 `fixtures/`：
 

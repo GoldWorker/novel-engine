@@ -23,7 +23,8 @@ import {
 const llm: LlmPort = {
   async complete() {
     // Replace with a gateway / WebLLM adapter. MockLlm.fromHandler also works
-    // (see examples/short-book.ts) — this package never ships a provider client.
+    // (see examples/short-book.ts). Optional fetch adapters: novel-engine/llm
+    // behind a BFF — do not embed API keys in a public worker bundle.
     return { text: "", toolCalls: [] };
   },
 };

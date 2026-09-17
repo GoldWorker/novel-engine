@@ -1,10 +1,10 @@
-# novel-engine API (0.1.0)
+# novel-engine API (0.2.0)
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
 Stable surface for host apps. Import from `novel-engine` unless noted. The published package only ships `dist/`, `README.md`, and `LICENSE`.
 
-This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, real LLM providers, Arbiter full scenes, or ChapterAdvanceGate review UI. `src/` never imports `node:fs` / `node:path`.
+This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, Arbiter full scenes, or ChapterAdvanceGate review UI. Default entries (`.` / `./worker`) do not bundle vendor LLM clients. Optional fetch adapters: [`novel-engine/llm`](llm-adapters.md). `src/` never imports `node:fs` / `node:path`.
 
 Host how-to is grouped by scenario in the [root README](../README.md#usage-by-scenario) ([中文](../README.zh-CN.md#使用场景)). Runnable sources: [`examples/`](../examples/).
 
@@ -14,10 +14,12 @@ Host how-to is grouped by scenario in the [root README](../README.md#usage-by-sc
 | --- | --- | --- |
 | `.` | `dist/index.js` | Engine, `route`, domain types, stores, mocks, main-thread client, book snapshot |
 | `./worker` | `dist/worker.js` | `attachEngineWorker` plus Engine / stores / snapshot for a dedicated worker |
+| `./llm` | `dist/llm.js` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope). Not pulled into `.` or `./worker`. |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
 import { attachEngineWorker } from "novel-engine/worker";
+import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 ```
 
 ## Engine
@@ -71,7 +73,7 @@ Same-thread mocks: [scenario 1 (short book)](../README.md#scenario-short-book) a
 | `LlmPort` | type | `complete(request) → { text, toolCalls? }`. |
 | `LlmCompletionRequest` / `LlmCompletionResult` / `LlmToolCall` / `LlmMessage` / `LlmToolSpec` / `LlmRole` | types | Completion wire types. |
 
-Hosts implement `LlmPort` against a gateway or WebLLM. This package never ships a provider client.
+Hosts implement `LlmPort` against a gateway or WebLLM, or import optional fetch adapters from [`novel-engine/llm`](llm-adapters.md). Default entries never ship a provider client. **Do not expose raw API keys in a public browser app.**
 
 ## Stores
 
@@ -113,6 +115,24 @@ See [scenario 5 (book snapshot)](../README.md#scenario-snapshot).
 | `MockLlmStep` / `MockLlmHandler` | types | Script entries. |
 
 Tests and the short/layered mock books use these only — no live providers.
+
+## Optional vendor LLM (`novel-engine/llm`)
+
+Not part of `.` or `./worker`. Fetch-based; no `openai` / `@anthropic-ai/sdk` dependency. Guide: [llm-adapters.md](llm-adapters.md) ([中文](llm-adapters.zh-CN.md)). Scenario: [README §6](../README.md#scenario-llm).
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `createOpenAiLlm(options)` | fn | Chat Completions. Default base `https://api.openai.com/v1`. |
+| `createAnthropicLlm(options)` | fn | Messages API. Default base `https://api.anthropic.com`. `maxTokens` default 4096. |
+| `createDashScopeLlm(options)` | fn | OpenAI-compatible DashScope (`compatible-mode/v1`). Reuses the OpenAI client. |
+| `createVendorLlm({ provider, ... })` | fn | `provider`: `"openai"` \| `"anthropic"` \| `"dashscope"`. |
+| `LlmAdapterError` | class | HTTP / mapping failures (`status?`, `body?`). |
+| `OPENAI_DEFAULT_BASE_URL` / `ANTHROPIC_DEFAULT_BASE_URL` / `DASHSCOPE_COMPAT_BASE_URL` | const | Documented defaults. |
+| `LlmAdapterOptions` / `OpenAiLlmOptions` / `AnthropicLlmOptions` / `DashScopeLlmOptions` / `VendorLlmOptions` / `LlmVendor` / `FetchLike` | types | `apiKey`, `model`, optional `baseUrl`, `fetch`, `headers`. |
+
+Tool call `arguments` are always a parsed object. **Do not put API keys in a public browser bundle** — use a BFF in production.
+
+Sketch: [`examples/llm-openai.ts`](../examples/llm-openai.ts).
 
 ## Worker host
 

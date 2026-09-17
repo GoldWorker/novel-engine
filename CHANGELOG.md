@@ -2,11 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- **Optional `novel-engine/llm`** — fetch-based `LlmPort` adapters for OpenAI Chat Completions, Anthropic Messages, and DashScope OpenAI-compatible mode (`compatible-mode/v1`). Factories: `createOpenAiLlm`, `createAnthropicLlm`, `createDashScopeLlm`, `createVendorLlm`. No `openai` / `@anthropic-ai/sdk` dependency. Default `.` / `./worker` bundles stay vendor-free. Package version **0.2.0**.
+
 ### Documentation
 
-- Reorganize host usage in the root README **by scenario** (short book, layered mid/long, OPFS, Worker, snapshot). `README.zh-CN.md` mirrors the same map. `examples/` stays the canonical runnable sources; its READMEs now point at the root hub instead of repeating the how-to.
+- Reorganize host usage in the root README **by scenario** (short book, layered mid/long, OPFS, Worker, snapshot, real LLM adapters). `README.zh-CN.md` mirrors the same map. `examples/` stays the canonical runnable sources; its READMEs now point at the root hub instead of repeating the how-to.
 - Add Chinese README (`README.zh-CN.md`) and API docs (`docs/api.zh-CN.md`).
 - Add copy-pasteable usage examples under `examples/`.
+- Add `docs/llm-adapters.md` / `docs/llm-adapters.zh-CN.md` and `examples/llm-openai.ts` (no secrets). Security note: do not expose raw API keys in a public browser app; prefer a Next.js BFF.
 
 ## 0.1.0 — 2026-09-17
 
