@@ -1,10 +1,22 @@
 # novel-engine
 
-Reusable **TypeScript** Novel Engine SDK. Pure frontend-capable (ESM), no UI, no React bindings, no TUI.
+Reusable **TypeScript** Novel Engine SDK for hosts that want to generate novels in the browser (or Node tests). Pure ESM, no UI, no React bindings, no TUI.
 
-Phase 3 adds **layered mid/long-book tools** on top of the Phase 2 Engine: `architect_long` (`layered_outline` / `expand_next_arc` / `append_volume` / `complete_book`), editor summaries (`save_review`, `save_arc_summary`, `save_volume_summary`), and a lightweight `novel_context` pack (sliding chapter summaries + arc/volume summaries). Phase 2's OpfsStore and Web Worker host remain. This package never talks to a real model and never touches `node:fs` in library runtime source.
+**0.1.0** is the first usable semver: Engine + `route` + MemoryStore / OpfsStore + MockLlm + Worker host + book snapshot zip.
+
+This package never talks to a real model and never uses `node:fs` / `node:path` in `src/`.
 
 Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli) (`internal/flow/router.go`, `internal/host/engine.go`).
+
+Stable exports are listed in [docs/api.md](docs/api.md).
+
+## What's not included
+
+- Real LLM provider clients (OpenAI, WebLLM, …) — inject `LlmPort`
+- React package, Demo SPA, or any visual app
+- Arbiter full semantic scenes (`plan_start` is a keyword stub)
+- ChapterAdvanceGate review-mode UI
+- Node filesystem adapters — implement `StorePort` outside this library if you need `fs`
 
 ## Ports & Adapters
 
@@ -24,51 +36,61 @@ Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/
 ```
 
 - **`route` is a pure function.** Input is an explicit `State` snapshot. It performs no IO and does not call `StorePort` or `LlmPort`.
-- **`StorePort`** loads that snapshot and persists artifacts (Progress, foundation, drafts, checkpoints, decisions). Hosts inject `MemoryStore`, `OpfsStore`, IndexedDB, or Node fs *outside* this library.
-- **`LlmPort`** runs architect / writer / editor completions (optional structured `toolCalls`). The library ships `MockLlm` / `ReplayLlm` only — no provider clients.
+- **`StorePort`** loads that snapshot and persists artifacts. Hosts inject `MemoryStore`, `OpfsStore`, IndexedDB, or Node fs *outside* this library.
+- **`LlmPort`** runs architect / writer / editor completions (optional structured `toolCalls`). The library ships `MockLlm` / `ReplayLlm` only.
 
-## Phase 3 contents
+## Install
 
-| Export | Role |
-| --- | --- |
-| `createEngine` / `Engine` | Serial loop: load state → `route` → Worker → repeat until complete / max steps. Cooperative `pause` / `resume` / `steer` at loop boundaries. |
-| `MemoryStore` | In-memory `StorePort` (path → JSON/bytes) |
-| `OpfsStore` / `createOpfsStore` / `isOpfsAvailable` | OPFS-backed `StorePort`; `createOpfsStore()` falls back to `MemoryStore` when OPFS is missing |
-| `createEngineClient` | Main-thread wrapper over a `Worker` / message port |
-| `attachEngineWorker` (`novel-engine/worker`) | Worker entry: constructs Engine with injected ports |
-| `MockLlm` / `ReplayLlm` | Scripted / fixture `LlmPort` for tests |
-| `route(state)` | Deterministic next `Instruction \| null` |
-| `Phase` / `Flow` validators | Forward-only Phase; illegal Flow jumps fail |
-| `architect_long` tools | `save_foundation(type=layered_outline\|append_volume\|complete_book)`, `expand_next_arc` |
-| Editor summaries | `save_review` (arc/global), `save_arc_summary`, `save_volume_summary` |
-| `novel_context` | Sliding chapter summaries + arc/volume summaries when present (no four-stage compressor) |
+```bash
+npm install novel-engine
+```
 
-**Not in Phase 3:** real LLM clients, Arbiter semantic scenes, ChapterAdvanceGate review mode, voice-layer polish, UI.
+Package exports:
 
-## Host injection (same thread)
+| Entry | Import | Role |
+| --- | --- | --- |
+| `.` | `novel-engine` | Engine, stores, client, mocks, snapshot, `route` |
+| `./worker` | `novel-engine/worker` | `attachEngineWorker` + Engine/stores for a dedicated worker |
+
+Published `files`: `dist/`, `README.md`, `LICENSE`.
+
+## Quickstart (mock short book)
 
 ```ts
 import { createEngine, MemoryStore, MockLlm } from "novel-engine";
 
 const store = new MemoryStore();
 const llm = new MockLlm([
-  { text: "done" }, // or { toolCalls: [{ id, name, arguments }] }
+  // Each complete() consumes one scripted step. Prefer toolCalls in real hosts.
+  { text: "done" },
 ]);
 
 const engine = createEngine({ store, llm, maxSteps: 40 });
-const result = await engine.run({ prompt: "写一本三章短篇：……" });
+const result = await engine.run({ prompt: "写一本三章短篇：灯塔看守人捡到一封没有寄信人的信。" });
 // result.stoppedReason === "complete" | "idle" | "paused" | "max_steps"
 ```
 
-A real host swaps the adapters:
-
-1. Implement `StorePort` (`loadState` / `read` / `write` / Progress helpers) over OPFS (below) or IndexedDB.
-2. Implement `LlmPort.complete` against your gateway / WebLLM. Return `toolCalls` when the model wants `save_book`, `save_foundation`, `plan_chapter`, `draft_chapter`, `commit_chapter`, etc.
-3. Call `createEngine({ store, llm }).run({ prompt })`.
-
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
 
-## OPFS store
+The repo's short-book fixture is the supported mock path:
+
+```bash
+npm run test:short
+```
+
+## Layered mock (mid / long)
+
+`architect_long` tools: `save_foundation(type=layered_outline|append_volume|complete_book)`, `expand_next_arc`. Editor summaries: `save_review` (arc/global), `save_arc_summary`, `save_volume_summary`. `novel_context` is a sliding window of chapter summaries plus arc/volume summaries when present (no four-stage compressor).
+
+```bash
+npm run test:layered
+```
+
+The layered fixture is one volume / two arcs. After two expanded chapters, Route hits arc-end: editor `save_review` → `save_arc_summary` → `expand_next_arc`. After the second arc it writes a volume summary, then `complete_book`.
+
+A host still injects `MemoryStore` + `MockLlm` (or a real `LlmPort`) the same way as the short-book quickstart — only the prompt keywords and tool names change.
+
+## Persist with OPFS
 
 `isOpfsAvailable()` is a capability check (`navigator.storage.getDirectory`, or an injected fake in tests).
 
@@ -79,43 +101,22 @@ import {
   createOpfsStore,
   isOpfsAvailable,
   OpfsStore,
-  MemoryStore,
 } from "novel-engine";
 
 if (!isOpfsAvailable()) {
-  // No OPFS (Node, insecure context, older browser). createOpfsStore()
-  // returns MemoryStore unless you pass { fallbackToMemory: false }.
+  // Node, insecure context, older browser.
+  // createOpfsStore() returns MemoryStore unless { fallbackToMemory: false }.
 }
 
 const store = await createOpfsStore(); // OpfsStore | MemoryStore
-// store is a StorePort; Engine does not care which.
-
-// Strict: throw if OPFS cannot be opened
-const persisted = await OpfsStore.open(); // subdirectory "novel-engine"
+const persisted = await OpfsStore.open(); // subdirectory "novel-engine"; throws if unavailable
 ```
 
-Writes use a sibling temp file then `move` (or copy-then-unlink) so a crash mid-write does not truncate the previous artifact. Tests inject an in-memory OPFS shim — no real browser required.
+Writes use a sibling temp file then `move` (or copy-then-unlink) so a crash mid-write does not truncate the previous artifact.
 
-Dedicated Workers can open OPFS; putting `OpfsStore` inside the worker (below) keeps disk IO off the main thread.
+## Embed in a Web Worker
 
-## Web Worker host
-
-The worker bundle is a **separate entry** so bundlers can tree-shake the main-thread client out of the worker (and vice versa):
-
-- `novel-engine` — Engine, stores, `createEngineClient`, protocol types
-- `novel-engine/worker` — `attachEngineWorker` + Engine/stores for the worker module
-
-Protocol (`v: 1`):
-
-| Direction | `type` | Role |
-| --- | --- | --- |
-| main → worker | `start` | `Engine.run({ prompt, maxSteps })` |
-| main → worker | `steer` | Persist a note, set `flow=steering`, pause at the next loop boundary |
-| main → worker | `pause` / `resume` | Cooperative yield / continue (after the current instruction) |
-| main → worker | `snapshot` | `{ state, result, running, paused }` |
-| worker → main | `event` | `started` / `step` / `paused` / `resumed` / `steered` / `stopped` |
-| worker → main | `snapshot` | Completes `start` / `snapshot` |
-| worker → main | `error` | Failed command (`id` correlates) |
+The worker bundle is a **separate entry** so bundlers can tree-shake the main-thread client out of the worker (and vice versa).
 
 Worker module (host-owned file; inject your `LlmPort`):
 
@@ -124,7 +125,7 @@ import { attachEngineWorker, createOpfsStore } from "novel-engine/worker";
 import type { LlmPort } from "novel-engine/worker";
 
 const llm: LlmPort = {
-  async complete(request) {
+  async complete() {
     // gateway / WebLLM — this library does not ship a provider client
     return { text: "", toolCalls: [] };
   },
@@ -159,20 +160,26 @@ await engine.resume();
 const snap = await engine.snapshot();
 ```
 
-`pause` / `steer` take effect **after the current Worker instruction** (architect/writer/editor tool-loop), not mid-tool. `steer` records a decision and sets `flow=steering` so `route` returns null until `resume()` restores the previous flow.
+`pause` / `steer` take effect **after the current Worker instruction**, not mid-tool. `steer` records a decision and sets `flow=steering` so `route` returns null until `resume()` restores the previous flow.
 
-Tests drive this protocol with a fake message port (no real `Worker` thread).
+Protocol (`v: 1`): `start` / `steer` / `pause` / `resume` / `snapshot` from main; `event` / `snapshot` / `error` from the worker.
 
-## Install / develop
+## Book snapshot export / import
 
-```bash
-npm install
-npm test
-npm run typecheck
-npm run build
+Browser-safe zip of every store path (fflate). Restore is a merge: snapshot paths are overwritten; extra files already in the destination stay.
+
+```ts
+import {
+  exportBookSnapshot,
+  importBookSnapshot,
+  MemoryStore,
+} from "novel-engine";
+
+const bytes = await exportBookSnapshot(store); // Uint8Array zip
+await importBookSnapshot(new MemoryStore(), bytes);
 ```
 
-`pnpm test` works the same (`package.json` script is `vitest run`). Tests use **mock fixtures only** — no network, no providers, no real OPFS.
+`MemoryStore` / `OpfsStore` implement `list()`, so custom extra files are included. Custom `StorePort` adapters without `list` still export the known book layout (`meta/`, `chapters/`, …).
 
 ## How `route` decides
 
@@ -206,6 +213,8 @@ import {
   ReplayLlm,
   route,
   inferPlanningStub,
+  exportBookSnapshot,
+  importBookSnapshot,
   type StorePort,
   type LlmPort,
 } from "novel-engine";
@@ -213,36 +222,28 @@ import {
 import { attachEngineWorker } from "novel-engine/worker";
 ```
 
-## Tests
+See [docs/api.md](docs/api.md) for the stable surface (domain types, Worker protocol, snapshot constants).
+
+## Develop / test
+
+```bash
+npm install
+npm test
+npm run test:short
+npm run test:layered
+npm run typecheck
+npm run build
+```
+
+Tests use **mock fixtures only** — no network, no providers, no real OPFS.
 
 Hand-authored JSON fixtures live in `fixtures/`:
 
 - `phase-transitions.json` / `flow-transitions.json` — validator golden tables
 - `route-cases.json` — Route golden cases
-- `short-book.json` — 3-chapter non-layered mock book (Phase 1, still required)
-- `layered-book.json` — 1 volume / 2 arcs mock mid-book (Phase 3)
-
-The end-to-end mock runs:
-
-```bash
-npm test -- tests/engine.short-book.test.ts
-npm test -- tests/engine.layered-book.test.ts
-```
-
-The short-book test starts from a prompt, injects `MemoryStore` + `MockLlm` (scripted tool calls, no provider), and asserts `phase === "complete"` with three committed chapters, checkpoints, and a stub `plan_start` decision.
-
-The layered mock run uses the same injection. Prompt keywords select `architect_long`. After two expanded chapters, Route hits arc-end: editor `save_review` (scope=arc) → `save_arc_summary` → `expand_next_arc`. After the second arc it writes a volume summary, then `complete_book`.
-
-Worker protocol + OPFS shim:
-
-```bash
-npm test -- tests/engine-host.test.ts tests/opfs-store.test.ts
-```
-
-```bash
-npm test
-npm run build
-```
+- `short-book.json` — 3-chapter non-layered mock book
+- `layered-book.json` — 1 volume / 2 arcs mock mid-book
+- `book-snapshot.json` — MemoryStore snapshot round-trip tree
 
 ## License
 
