@@ -1,0 +1,150 @@
+# novel-engine API（0.1.0）
+
+[English](api.md) | [中文文档](api.zh-CN.md)
+
+宿主应用的稳定面。除非另有说明，一律从 `novel-engine` 导入。发布包只包含 `dist/`、`README.md` 和 `LICENSE`。
+
+本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、真实 LLM 供应商、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。`src/` 从不导入 `node:fs` / `node:path`。
+
+可复制的宿主示例见 [`examples/`](../examples/)（[中文说明](../examples/README.zh-CN.md)）。
+
+## 包入口
+
+| 子路径 | 模块 | 用途 |
+| --- | --- | --- |
+| `.` | `dist/index.js` | Engine、`route`、领域类型、stores、mocks、主线程 client、书籍快照 |
+| `./worker` | `dist/worker.js` | `attachEngineWorker`，以及供专用 Worker 使用的 Engine / stores / snapshot |
+
+```ts
+import { createEngine, createEngineClient } from "novel-engine";
+import { attachEngineWorker } from "novel-engine/worker";
+```
+
+## Engine（引擎）
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `createEngine(deps)` | fn | 构造 `Engine`。必填：`store`、`llm`。可选：`maxSteps`（40）、`maxWorkerTurns`（16）、`onEvent`。 |
+| `Engine` | class | 串行循环：加载 state → `route` → Worker 工具 → 重复。 |
+| `EngineError` | class | 非法 `steer` / 重复 `run`。 |
+| `EngineDeps` | type | 构造输入。 |
+| `EngineResult` | type | `{ phase, steps, stoppedReason, lastInstruction, error? }`。 |
+| `EngineStopReason` | type | `"complete" \| "max_steps" \| "paused" \| "idle"`。 |
+| `EngineLoopEvent` | type | `step` / `paused` / `resumed` / `steered` / `stopped`。 |
+| `inferPlanningStub(prompt)` | fn | 关键词桩：`长篇` → long，`中篇`/`分层` → mid，否则 short。 |
+
+`Engine.run({ prompt, maxSteps })` 会引导 Progress，然后循环直到 complete / idle / pause / 上限。`pause` / `resume` / `steer` 是协作式的（下一个循环边界才生效）。`steer` 会持久化一条决策并设置 `flow=steering`。
+
+同线程宿主：
+
+```ts
+const engine = createEngine({ store, llm });
+await engine.run({ prompt: "写一本三章短篇：……" });
+```
+
+完整短篇 / 分层 mock 见 [`examples/short-book.ts`](../examples/short-book.ts) 与 [`examples/layered-book.ts`](../examples/layered-book.ts)。
+
+## `route` 与领域类型
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `route(state)` | fn | 纯函数。返回 `Instruction \| null`。无 IO。 |
+| `State` | type | `route` 消费的显式快照。 |
+| `Instruction` | type | `{ agent, task, reason, chapter? }`。 |
+| `Phase` / `PHASES` | type / const | `init` → `premise` → `outline` → `writing` → `complete`。 |
+| `Flow` / `FLOWS` | type / const | `writing` / `reviewing` / `rewriting` / `polishing` / `steering`。 |
+| `PlanningTier` / `PLANNING_TIERS` | type / const | `short` / `mid` / `long`。 |
+| `Progress` | type | 游标 + 已完成章节 + `layered`。 |
+| `AgentId` / `AGENTS` | type / const | `architect_short` / `architect_long` / `writer` / `editor`。 |
+| `canTransitionPhase` / `validatePhaseTransition` / `PhaseTransitionError` | fn / class | 只允许向前的 Phase。 |
+| `canTransitionFlow` / `validateFlowTransition` / `FlowTransitionError` | fn / class | 非法 Flow 跳转失败。 |
+| `plannerForTier` | fn | short → `architect_short`；mid/long → `architect_long`。 |
+| `latestCompleted` / `nextChapter` / `isResumable` | fn | Progress 辅助函数。 |
+| `REVIEW_INTERVAL` / `shouldReview` | const / fn | 非分层全局审阅每 5 章一次。 |
+| `ArcBoundary` | type | 分层弧/卷末事实。 |
+
+## Ports（端口）
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `StorePort` | type | `loadState`、`loadProgress`、`saveProgress`、`read`、`write`、`has`，可选 `list`。 |
+| `LlmPort` | type | `complete(request) → { text, toolCalls? }`。 |
+| `LlmCompletionRequest` / `LlmCompletionResult` / `LlmToolCall` / `LlmMessage` / `LlmToolSpec` / `LlmRole` | types | 补全线路类型。 |
+
+宿主针对网关或 WebLLM 实现 `LlmPort`。本包从不附带供应商客户端。
+
+## Stores（存储）
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `MemoryStore` | class | 内存 `StorePort`（路径 → 字节）。`list()` 是同步的。 |
+| `OpfsStore` | class | OPFS `StorePort`。`OpfsStore.open(options)` 在缺失时抛 `OpfsUnavailableError`。 |
+| `createOpfsStore(options?)` | fn | 有 OPFS 则用 OPFS；否则 `MemoryStore`（设 `fallbackToMemory: false` 改为抛错）。 |
+| `isOpfsAvailable(storage?)` | fn | `navigator.storage.getDirectory` 或注入的 fake。 |
+| `OpfsUnavailableError` | class | 严格 open 时抛出。 |
+| `PATHS` | const | 逻辑布局（`meta/progress.json`、`outline.json` 等）。 |
+
+`MemoryStore` 和 `OpfsStore` 实现了 `list()`，因此快照导出会包含每个文件。自定义适配器可以省略 `list`；导出时会探测已知书籍布局。
+
+OPFS 示例：[examples/opfs-store.ts](../examples/opfs-store.ts)。
+
+## 书籍快照
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `exportBookSnapshot(store)` | fn | `Promise<Uint8Array>`，把所有 store 路径打成 zip（外加一份清单）。 |
+| `importBookSnapshot(store, bytes)` | fn | 还原进 `StorePort`（merge；不删除目标里多出来的文件）。 |
+| `SnapshotError` | class | 非法 zip、缺失/未知清单、路径逃逸。 |
+| `BOOK_SNAPSHOT_FORMAT` | const | `"novel-engine-book-snapshot"`。 |
+| `BOOK_SNAPSHOT_VERSION` | const | `1`。 |
+| `BOOK_SNAPSHOT_MANIFEST_PATH` | const | zip 内的 `.novel-engine-snapshot.json`（不会写入 store）。 |
+| `BookSnapshotManifest` | type | `{ format, version, files }`。 |
+
+Zip 由 [fflate](https://github.com/101arrowz/fflate)（浏览器构建）生成。匹配 `.*.tmp` 的临时文件会被跳过。
+
+```ts
+const bytes = await exportBookSnapshot(store);
+await importBookSnapshot(otherStore, bytes);
+```
+
+往返示例：[examples/snapshot-roundtrip.ts](../examples/snapshot-roundtrip.ts)。
+
+## Mock LLM
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `MockLlm` | class | 脚本化 `LlmPort`。耗尽会抛错。`MockLlm.fromHandler(fn)` 用于夹具回放。 |
+| `ReplayLlm` | class | 纯结果列表回放。 |
+| `MockLlmStep` / `MockLlmHandler` | types | 脚本条目。 |
+
+测试以及短篇/分层 mock 书只用这些——没有在线供应商。
+
+## Worker 宿主
+
+来自 `novel-engine`：
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `createEngineClient(port)` | fn | 主线程对 `Worker` / message port 的封装。 |
+| `EngineClient` | type | `start` / `pause` / `resume` / `steer` / `snapshot` / `onEvent` / `close`。 |
+| `ENGINE_PROTOCOL` | const | `1`。 |
+| `isEngineCommand` / `isEngineNotice` / `loopEventToHost` | fn | 协议守卫 / 映射。 |
+| `EngineCommand` / `EngineNotice` / `EngineHostEvent` / `EngineSnapshot` | types | 带类型的消息。 |
+
+来自 `novel-engine/worker`：
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `attachEngineWorker(port, { createPorts })` | fn | Worker 入口。`createPorts` 注入 `StorePort` + `LlmPort`。 |
+| `EngineWorkerOptions` / `EngineWorkerPorts` | types | Worker 装配。 |
+| `createEngine`、stores、`MockLlm`、snapshot 辅助 | 再导出 | 让 Worker 包不必导入主线程 client。 |
+
+命令：`start`、`steer`、`pause`、`resume`、`snapshot`。通知：`event`、`snapshot`、`error`。
+
+嵌入示例：[examples/engine.worker.ts](../examples/engine.worker.ts) + [examples/worker-host.ts](../examples/worker-host.ts)。
+
+## 高级 store 辅助
+
+这些导出给需要装配或检查产物的宿主，但运行 Engine 并不要求使用它们：
+
+`readJson`、`writeJson`、`readText`、`writeText`、`readJsonl`、`flattenOutline`、`estimatedChapterCapacity`、`checkArcBoundary`、`completedArcBoundaries`、`assembleNovelContext`、`SLIDING_SUMMARY_WINDOW`、`chapterSummaryPath`、`arcSummaryPath`、`volumeSummaryPath`、`arcReviewPath`、`globalReviewPath`，以及产物类型（`BookMetadata`、`OutlineEntry`、`VolumeOutline`、`Checkpoint`、`DecisionRecord` 等）。

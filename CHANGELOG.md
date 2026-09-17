@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- Add Chinese README (`README.zh-CN.md`) and API docs (`docs/api.zh-CN.md`).
+- Add copy-pasteable usage examples under `examples/`.
+
 ## 0.1.0 — 2026-09-17
 
 First usable semver for host apps. Pure-frontend ESM library: no UI, no real LLM providers, no `node:fs` in `src/`.

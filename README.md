@@ -1,5 +1,7 @@
 # novel-engine
 
+[English](README.md) | [中文文档](README.zh-CN.md)
+
 Reusable **TypeScript** Novel Engine SDK for hosts that want to generate novels in the browser (or Node tests). Pure ESM, no UI, no React bindings, no TUI.
 
 **0.1.0** is the first usable semver: Engine + `route` + MemoryStore / OpfsStore + MockLlm + Worker host + book snapshot zip.
@@ -8,7 +10,7 @@ This package never talks to a real model and never uses `node:fs` / `node:path` 
 
 Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli) (`internal/flow/router.go`, `internal/host/engine.go`).
 
-Stable exports are listed in [docs/api.md](docs/api.md).
+Stable exports are listed in [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)). Copy-pasteable host examples live in [`examples/`](examples/) ([中文说明](examples/README.zh-CN.md)).
 
 ## What's not included
 
@@ -56,6 +58,8 @@ Published `files`: `dist/`, `README.md`, `LICENSE`.
 
 ## Quickstart (mock short book)
 
+Full copy-pasteable run (handler through `phase=complete`): [`examples/short-book.ts`](examples/short-book.ts).
+
 ```ts
 import { createEngine, MemoryStore, MockLlm } from "novel-engine";
 
@@ -70,6 +74,8 @@ const result = await engine.run({ prompt: "写一本三章短篇：灯塔看守�
 // result.stoppedReason === "complete" | "idle" | "paused" | "max_steps"
 ```
 
+To finish a whole book, use `MockLlm.fromHandler` (Worker tools echo results back; `audit_foundation` must reuse the `fingerprint` from `novel_context`). `ReplayLlm` only replays a fixed `{ text, toolCalls? }[]` and does not inspect the request.
+
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
 
 The repo's short-book fixture is the supported mock path:
@@ -79,6 +85,8 @@ npm run test:short
 ```
 
 ## Layered mock (mid / long)
+
+Full copy-pasteable run: [`examples/layered-book.ts`](examples/layered-book.ts).
 
 `architect_long` tools: `save_foundation(type=layered_outline|append_volume|complete_book)`, `expand_next_arc`. Editor summaries: `save_review` (arc/global), `save_arc_summary`, `save_volume_summary`. `novel_context` is a sliding window of chapter summaries plus arc/volume summaries when present (no four-stage compressor).
 
@@ -91,6 +99,8 @@ The layered fixture is one volume / two arcs. After two expanded chapters, Route
 A host still injects `MemoryStore` + `MockLlm` (or a real `LlmPort`) the same way as the short-book quickstart — only the prompt keywords and tool names change.
 
 ## Persist with OPFS
+
+Full copy-pasteable setup: [`examples/opfs-store.ts`](examples/opfs-store.ts).
 
 `isOpfsAvailable()` is a capability check (`navigator.storage.getDirectory`, or an injected fake in tests).
 
@@ -115,6 +125,8 @@ const persisted = await OpfsStore.open(); // subdirectory "novel-engine"; throws
 Writes use a sibling temp file then `move` (or copy-then-unlink) so a crash mid-write does not truncate the previous artifact.
 
 ## Embed in a Web Worker
+
+Full copy-pasteable pair: [`examples/engine.worker.ts`](examples/engine.worker.ts) (worker thread) + [`examples/worker-host.ts`](examples/worker-host.ts) (main thread).
 
 The worker bundle is a **separate entry** so bundlers can tree-shake the main-thread client out of the worker (and vice versa).
 
@@ -166,6 +178,8 @@ Protocol (`v: 1`): `start` / `steer` / `pause` / `resume` / `snapshot` from main
 
 ## Book snapshot export / import
 
+Full copy-pasteable round-trip: [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts).
+
 Browser-safe zip of every store path (fflate). Restore is a merge: snapshot paths are overwritten; extra files already in the destination stay.
 
 ```ts
@@ -198,6 +212,18 @@ Priority is first-match, matching ainovel-cli `internal/flow/router.go`:
 11. Else → writer next chapter
 
 `null` is valid: Engine then tries the plan_start stub, or stops (`complete` / `idle`).
+
+## Examples
+
+| File | What it shows |
+| --- | --- |
+| [`examples/short-book.ts`](examples/short-book.ts) | Short book to complete (`MockLlm` / `ReplayLlm`) |
+| [`examples/layered-book.ts`](examples/layered-book.ts) | Layered mid-book `architect_long` |
+| [`examples/opfs-store.ts`](examples/opfs-store.ts) | OPFS with MemoryStore fallback |
+| [`examples/engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) | Worker embed + protocol |
+| [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) | Snapshot zip round-trip |
+
+Index: [`examples/README.md`](examples/README.md) · [中文](examples/README.zh-CN.md)
 
 ## Public API
 
