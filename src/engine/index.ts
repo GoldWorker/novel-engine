@@ -55,7 +55,8 @@ const DEADLOCK_ABORT_AT = 5;
  * Serial Engine: load state → route → run worker → repeat until complete or max steps.
  *
  * No ChapterAdvanceGate (auto only). plan_start is a deterministic stub
- * (`architect_short` for short books). Worker failures retry once, then pause.
+ * (`architect_short` for short books, `architect_long` for 中篇/长篇/分层).
+ * Worker failures retry once, then pause.
  *
  * `pause` / `resume` / `steer` are cooperative: they take effect at the next
  * loop boundary (after the current Worker instruction finishes).

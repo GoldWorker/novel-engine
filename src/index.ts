@@ -56,13 +56,31 @@ export {
   readText,
   writeText,
   readJsonl,
+  flattenOutline,
+  estimatedChapterCapacity,
+  checkArcBoundary,
+  completedArcBoundaries,
+  assembleNovelContext,
+  SLIDING_SUMMARY_WINDOW,
+  chapterSummaryPath,
+  arcSummaryPath,
+  volumeSummaryPath,
+  arcReviewPath,
+  globalReviewPath,
 } from "./store/index.js";
 export type {
   BookMetadata,
   OutlineEntry,
+  VolumeOutline,
+  ArcOutline,
+  ArcExpansion,
   Character,
   WorldRule,
   ChapterPlan,
+  ChapterSummary,
+  ArcSummary,
+  VolumeSummary,
+  ReviewEntry,
   Checkpoint,
   DecisionRecord,
   RunMeta,
@@ -78,6 +96,7 @@ export { MockLlm, ReplayLlm } from "./llm/index.js";
 export type { MockLlmHandler, MockLlmStep } from "./llm/index.js";
 
 export { createEngine, Engine, EngineError } from "./engine/index.js";
+export { inferPlanningStub } from "./engine/plan-start.js";
 export type {
   EngineDeps,
   EngineResult,

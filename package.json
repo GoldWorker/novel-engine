@@ -1,7 +1,7 @@
 {
   "name": "novel-engine",
   "version": "0.0.1",
-  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Phase 2: Engine + MemoryStore + OpfsStore + Worker host.",
+  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Phase 3: layered mid/long-book tools on Engine + MemoryStore + OpfsStore + Worker host.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,

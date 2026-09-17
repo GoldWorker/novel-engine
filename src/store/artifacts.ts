@@ -9,6 +9,99 @@ export interface OutlineEntry {
   chapter: number;
   title: string;
   summary?: string;
+  coreEvent?: string;
+  hook?: string;
+  scenes?: readonly string[];
+}
+
+/** Volume-level outline (layered mid/long books). */
+export interface VolumeOutline {
+  index: number;
+  title: string;
+  theme: string;
+  final?: boolean;
+  arcs: ArcOutline[];
+}
+
+/** Arc-level outline. Skeleton arcs have `estimatedChapters` and empty `chapters`. */
+export interface ArcOutline {
+  index: number;
+  title: string;
+  goal: string;
+  estimatedChapters?: number;
+  chapters: OutlineEntry[];
+}
+
+/** Architect payload for `expand_next_arc`. */
+export interface ArcExpansion {
+  title: string;
+  goal: string;
+  chapters: OutlineEntry[];
+}
+
+export interface ChapterSummary {
+  chapter: number;
+  title: string;
+  summary: string;
+  characters?: readonly string[];
+  keyEvents?: readonly string[];
+}
+
+export interface ArcSummary {
+  volume: number;
+  arc: number;
+  title: string;
+  summary: string;
+  keyEvents?: readonly string[];
+}
+
+export interface VolumeSummary {
+  volume: number;
+  title: string;
+  summary: string;
+  keyEvents?: readonly string[];
+}
+
+export interface CharacterSnapshot {
+  volume?: number;
+  arc?: number;
+  name: string;
+  status: string;
+  power?: string;
+  motivation: string;
+  relations?: string;
+}
+
+export interface CharacterVoice {
+  name: string;
+  rules: readonly string[];
+}
+
+export interface WritingStyleRules {
+  volume: number;
+  arc: number;
+  prose: readonly string[];
+  dialogue: readonly CharacterVoice[];
+  taboos?: readonly string[];
+}
+
+export interface ReviewIssue {
+  type?: string;
+  severity?: string;
+  description?: string;
+  evidence?: string;
+  suggestion?: string;
+  chapters?: readonly number[];
+  requiresChange?: boolean;
+}
+
+export interface ReviewEntry {
+  chapter: number;
+  scope: string;
+  summary: string;
+  issues: readonly ReviewIssue[];
+  verdict?: string;
+  dimensions?: readonly unknown[];
 }
 
 export interface Character {
