@@ -1,4 +1,4 @@
-# Host Session API (`novel-engine/session`) — S0 / S1
+# Host Session API (`novel-engine/session`) — S0 / S1 / S2
 
 [English](session.md) | [中文文档](session.zh-CN.md)
 
@@ -8,7 +8,7 @@ Same-thread host façade for inspecting a book's foundation and switching betwee
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-Package version **0.3.0**. This document covers **S0 + S1 only**.
+Package version **0.3.0**. This document covers **S0 + S1 + S2**.
 
 ## Status
 
@@ -16,7 +16,7 @@ Package version **0.3.0**. This document covers **S0 + S1 only**.
 | --- | --- | --- |
 | **S0** | Types, gap table, `foundationMissing` layered-outline fix | Done |
 | **S1** | `createNovelSession` read/inspect + `createNovelWorkspace` | Done |
-| **S2** | `generateFoundation` / upsert / auto-write (structured LLM) | Not yet |
+| **S2** | `generateFoundation` / upsert / auto-write (structured LLM) | Done |
 | **S3** | ChapterRunner / chapter write APIs | Not yet |
 | **S4** | Worker session bridge | Not yet |
 
@@ -53,7 +53,7 @@ await session.inspectFoundation({ prompt: "写一本分层中篇：……" });
 await session.assertReadyToWrite();
 ```
 
-`llm` is optional in S1 (unused, accepted for S2). Every read is **store read-through** (no Session cache of artifacts).
+`llm` is optional for inspect-only. **S2** `generateFoundation` / `startAutoWrite` require it (`SessionLlmRequiredError` if missing). Every read is **store read-through** (no Session cache of artifacts).
 
 | Method | Notes |
 | --- | --- |
@@ -64,9 +64,13 @@ await session.assertReadyToWrite();
 | `assertReadyToWrite({ prompt? })` | Throws `FoundationIncompleteError` with `gaps` when not ready. |
 | `listArtifacts(prefix?)` | `listStorePaths`. |
 | `exportSnapshot()` / `importSnapshot(bytes)` | Thin wrappers around the existing book-snapshot APIs. |
+| `upsertFoundation(patch)` | Partial write of `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules`. Invalidates `meta/foundation_audit.json` when fingerprint files change. |
+| `generateFoundation({ prompt, keys, mode? })` | Structured one-shot `LlmPort.complete`; parse JSON from `text`; `upsertFoundation`. **Not** an Engine loop. |
+| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | Optional upsert/generate, then either `{ status: "needs_foundation" }` or `createEngine(...).run`. |
+| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `stopped`. Returns unsubscribe. |
 | `close()` | Further calls throw `SessionClosedError`. |
 
-**Not in S1:** `upsertFoundation`, `generateFoundation`, `startAutoWrite`, `chapter.*`.
+**Not in S2:** ChapterRunner / `chapter.*` (S3), Worker session bridge (S4).
 
 `readyToWrite` is `true` iff `foundationMissing` is empty (same audit / writing-phase rule as the Engine).
 
@@ -82,6 +86,52 @@ interface FoundationGap {
 ```
 
 For mid/long, a missing outline gap points at `layered_outline.json` and explains that a flat `outline.json` also satisfies the requirement.
+
+## S2 — generate / upsert / auto-write
+
+`generateFoundation` is a **structured one-shot LLM call + `upsertFoundation`**. It does not run a restricted Engine loop and does not write chapters or drafts.
+
+### `upsertFoundation(patch)`
+
+```ts
+await session.upsertFoundation({
+  book: { title: "无主的信", synopsis: "……" },
+  premise: "……",
+  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }],
+  characters: [{ name: "林守" }],
+  worldRules: [{ name: "信与潮", description: "……" }],
+});
+```
+
+Light shape checks, then `writeJson` / `writeText` on existing `PATHS`. Any write to fingerprint files (`book`, `premise`, `outline`, `characters`, `world_rules`, `layered_outline`) **invalidates** `meta/foundation_audit.json` (`StorePort.remove` when implemented; otherwise a cleared audit record). Returns a fresh `getFoundation()`.
+
+### `generateFoundation({ prompt, keys, mode? })`
+
+- `keys`: subset of `book | premise | outline | layered_outline | characters | world_rules`
+- `mode`: `fill_missing` (default) — only keys that `inspectFoundation` still reports as gaps — or `overwrite`
+- Requires `llm` on `createNovelSession`
+- One `LlmPort.complete` with **no tools**. The model must return a **JSON object in `text`** (optional ` ```json ` fence). Parsed fields are passed to `upsertFoundation`.
+- MockLlm: `{ text: JSON.stringify({ premise: "…", outline: [/* … */] }) }`
+
+### `startAutoWrite`
+
+```ts
+const outcome = await session.startAutoWrite({
+  prompt: "写一本三章短篇：……",
+  foundation: { book: { title: "无主的信", synopsis: "……" } },
+  generateMissing: true,
+  requireConfirmGaps: true, // default
+  maxSteps: 20,
+});
+```
+
+1. Optional `foundation` → `upsertFoundation`
+2. Optional `generateMissing: true` → `generateFoundation({ prompt, keys: missing, mode: "fill_missing" })`
+3. `inspectFoundation({ prompt })`
+4. If `requireConfirmGaps !== false` (default **true**) and `gaps.length > 0` → `{ status: "needs_foundation", gaps, meta }` **without** `Engine.run`
+5. If ready (or confirm disabled) → `createEngine({ store, llm }).run({ prompt, maxSteps })` → `{ status: "completed" | "stopped", result, meta }` (`completed` when `stoppedReason === "complete"`)
+
+`subscribe` emits `foundation_updated` after upsert, `auto_write_step` for each Engine `step`, and `stopped` for both needs-foundation and Engine outcomes.
 
 ## S1 — `NovelWorkspace`
 
@@ -122,13 +172,14 @@ The workspace **caches** the first store returned for each `bookId`. Memory test
 | Error | When |
 | --- | --- |
 | `FoundationIncompleteError` | `assertReadyToWrite` — `.gaps` is the inspect table. |
+| `SessionLlmRequiredError` | `generateFoundation` / Engine `startAutoWrite` without `llm`. |
+| `FoundationGenerateError` | Bad `keys`, or `complete().text` is not a JSON object. |
 | `SessionClosedError` | Method on a closed session (including after `switchTo`). |
 | `WorkspaceClosedError` | Workspace method after `close()`. |
 | `BookNotFoundError` | `open` / `switchTo` unknown `bookId`. |
 
 ## Coming later
 
-- **S2** — structured LLM `generateFoundation` / upsert / auto-write
 - **S3** — ChapterRunner
 - **S4** — Worker session bridge
 

@@ -17,7 +17,7 @@ Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)). Se
 ## What's not included
 
 - Vendor LLM clients in the default `novel-engine` / `novel-engine/worker` bundles — inject `LlmPort`, or import optional [`novel-engine/llm`](docs/llm-adapters.md) (fetch adapters; **do not put API keys in a public browser app**)
-- Host session in the default bundles — import optional [`novel-engine/session`](docs/session.md) (S0/S1 inspect + workspace; S2 generateFoundation / S3 ChapterRunner / S4 Worker session are not included yet)
+- Host session in the default bundles — import optional [`novel-engine/session`](docs/session.md) (S0–S2 inspect, generate, auto-write, workspace; S3 ChapterRunner / S4 Worker session are not included yet)
 - React package, Demo SPA, or any visual app
 - Arbiter full semantic scenes (`plan_start` is a keyword stub)
 - ChapterAdvanceGate review-mode UI
@@ -75,7 +75,7 @@ Scenarios compose: the Worker example already calls `createOpfsStore()`; snapsho
 | [4. Embed in a Web Worker](#scenario-worker) | Dedicated worker + main-thread client: `start` / `steer` / `pause` / `resume` / `snapshot`. | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. Book snapshot export / import](#scenario-snapshot) | Zip every store path (fflate) and merge-restore into another `StorePort`. | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. Inject a real LLM](#scenario-llm) | Host-side OpenAI / Anthropic / DashScope `LlmPort` via optional `novel-engine/llm`. Keys belong on a BFF. | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
-| [7. Host session (inspect + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace` for foundation gaps and multi-book switching. No generate/write yet (S2–S4). | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
+| [7. Host session (inspect + generate + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace`: foundation gaps, structured JSON generate, optional Engine auto-write. No ChapterRunner / Worker session (S3–S4). | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
 
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
 
@@ -333,21 +333,27 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 ### 7. Host session (`novel-engine/session`)
 
-**When:** A same-thread host wants to inspect whether a store is ready to write, or switch among several books, without running the Engine loop.
+**When:** A same-thread host wants to inspect whether a store is ready to write, fill foundation via a structured LLM JSON call, or switch among several books.
 
-Optional subpath. S0/S1 only: `getFoundation` / `inspectFoundation` / `assertReadyToWrite` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. **Not yet:** `generateFoundation` (S2), ChapterRunner (S3), Worker session (S4).
+Optional subpath. S0–S2: `getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. `generateFoundation` is **one-shot JSON in `LlmPort.complete().text`**, not an Engine loop. **Not yet:** ChapterRunner (S3), Worker session (S4).
 
 Details: [docs/session.md](docs/session.md) ([中文](docs/session.zh-CN.md)). Sketch: [`examples/session-workspace.ts`](examples/session-workspace.ts).
 
 ```ts
-import { MemoryStore, PATHS, writeJson } from "novel-engine";
+import { MemoryStore } from "novel-engine";
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 
 const store = new MemoryStore();
-const session = await createNovelSession({ store, bookId: "letter" });
-await writeJson(store, PATHS.book, { title: "无主的信", synopsis: "……" });
+const session = await createNovelSession({ store, llm, bookId: "letter" });
 const inspected = await session.inspectFoundation({ prompt: "写一本三章短篇" });
-// inspected.readyToWrite === false until foundation + writing/complete phase
+await session.upsertFoundation({ book: { title: "无主的信", synopsis: "……" } });
+// generateFoundation parses JSON from complete().text (MockLlm-friendly)
+const outcome = await session.startAutoWrite({
+  prompt: "写一本三章短篇：……",
+  generateMissing: true,
+  requireConfirmGaps: true,
+});
+// outcome.status === "needs_foundation" until audit / writing phase is ready
 
 const stores = new Map<string, MemoryStore>();
 const ws = createNovelWorkspace({

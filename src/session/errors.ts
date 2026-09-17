@@ -34,3 +34,19 @@ export class BookNotFoundError extends Error {
     this.bookId = bookId;
   }
 }
+
+export class SessionLlmRequiredError extends Error {
+  constructor(
+    message = "createNovelSession requires an llm for generateFoundation / startAutoWrite",
+  ) {
+    super(message);
+    this.name = "SessionLlmRequiredError";
+  }
+}
+
+export class FoundationGenerateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FoundationGenerateError";
+  }
+}

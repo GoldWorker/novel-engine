@@ -15,7 +15,7 @@ Host how-to is grouped by scenario in the [root README](../README.md#usage-by-sc
 | `.` | `dist/index.js` | Engine, `route`, domain types, stores, mocks, main-thread client, book snapshot |
 | `./worker` | `dist/worker.js` | `attachEngineWorker` plus Engine / stores / snapshot for a dedicated worker |
 | `./llm` | `dist/llm.js` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope). Not pulled into `.` or `./worker`. |
-| `./session` | `dist/session.js` | Optional same-thread host session (S0/S1 inspect + workspace). Not pulled into `.` / `./worker` / `./llm`. |
+| `./session` | `dist/session.js` | Optional same-thread host session (S0–S2 inspect, generate, auto-write, workspace). Not pulled into `.` / `./worker` / `./llm`. |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
@@ -89,7 +89,7 @@ Hosts implement `LlmPort` against a gateway or WebLLM, or import optional fetch 
 | `OpfsUnavailableError` | class | Thrown by strict open. |
 | `PATHS` | const | Logical layout (`meta/progress.json`, `outline.json`, …). |
 
-`MemoryStore` and `OpfsStore` implement `list()` so snapshot export includes every file. Custom adapters may omit `list`; export then probes the known book layout.
+`MemoryStore` and `OpfsStore` implement `list()` so snapshot export includes every file. Custom adapters may omit `list`; export then probes the known book layout. Optional `remove(path)` deletes a path (no-op if missing); Session uses it to invalidate a stale foundation audit.
 
 See [scenario 3 (OPFS persist)](../README.md#scenario-opfs).
 
@@ -139,20 +139,24 @@ Sketch: [`examples/llm-openai.ts`](../examples/llm-openai.ts).
 
 ## Optional host session (`novel-engine/session`)
 
-Not part of `.`, `./worker`, or `./llm`. Same-thread inspect + multi-book workspace (S0/S1). Guide: [session.md](session.md) ([中文](session.zh-CN.md)). Scenario: [README §7](../README.md#scenario-session).
+Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, and multi-book workspace. Guide: [session.md](session.md) ([中文](session.zh-CN.md)). Scenario: [README §7](../README.md#scenario-session).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `createNovelSession({ store, llm?, bookId })` | fn | Same-thread session. `llm` unused in S1 (forward-compat). |
-| `NovelSession` | type | `getFoundation` / `getProgress` / `inspectFoundation` / `assertReadyToWrite` / `listArtifacts` / snapshot wrappers / `close`. |
+| `createNovelSession({ store, llm?, bookId })` | fn | Same-thread session. `llm` required for S2 generate / auto-write. |
+| `NovelSession` | type | Inspect + `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `subscribe` / snapshot wrappers / `close`. |
 | `createNovelWorkspace({ createStore, llm?, indexStore? })` | fn | One store per `bookId`. Optional `indexStore` persists `_index.json`. |
 | `NovelWorkspace` | type | `createBook` / `open` / `switchTo` / `listBooks` / `close` / `currentBookId`. |
 | `FoundationMeta` / `FoundationGap` / `InspectResult` / `PlanningInfo` | types | Inspect payload. Gaps include bilingual hints. |
+| `FoundationPatch` / `FoundationKey` / `FOUNDATION_KEYS` / `GenerateFoundationOptions` / `StartAutoWriteOptions` / `AutoWriteResult` / `SessionEvent` | types | S2 generate / auto-write. |
 | `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`. |
+| `SessionLlmRequiredError` / `FoundationGenerateError` | class | Missing `llm`; bad generate JSON / keys. |
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | Closed session/workspace; unknown `bookId`. |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`. |
 
-**Not in S1:** `generateFoundation`, upsert, auto-write, ChapterRunner, Worker session bridge (S2–S4).
+**Not in S2:** ChapterRunner, Worker session bridge (S3–S4).
+
+`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). `fill_missing` (default) only upserts keys that are still gaps.
 
 Sketch: [`examples/session-workspace.ts`](../examples/session-workspace.ts).
 

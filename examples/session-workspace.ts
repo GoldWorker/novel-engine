@@ -2,20 +2,54 @@
  * Scenario 7 — same-thread host session (`novel-engine/session`).
  * 场景 7：同线程宿主 Session（`novel-engine/session`）。
  *
- * S0+S1: inspect foundation + multi-book workspace. No generateFoundation,
- * ChapterRunner, or Worker session bridge (S2–S4).
- * S0+S1：检查基础设定 + 多书工作区。不含 generateFoundation / ChapterRunner / Worker 桥（S2–S4）。
+ * S0–S2: inspect foundation, upsert/generate (JSON in LlmPort.complete().text),
+ * startAutoWrite, multi-book workspace. No ChapterRunner or Worker bridge (S3–S4).
+ * S0–S2：检查基础设定、upsert/generate（JSON 在 complete().text）、
+ * startAutoWrite、多书工作区。不含 ChapterRunner / Worker 桥（S3–S4）。
  */
 
-import { MemoryStore, PATHS, writeJson, writeText } from "novel-engine";
+import { MemoryStore, MockLlm } from "novel-engine";
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 
 export async function inspectExistingStore() {
   const store = new MemoryStore();
   const session = await createNovelSession({ store, bookId: "letter" });
-  await writeJson(store, PATHS.book, { title: "无主的信", synopsis: "灯塔与潮" });
-  await writeText(store, PATHS.premise, "林守捡到一封没有寄信人的信。");
+  await session.upsertFoundation({
+    book: { title: "无主的信", synopsis: "灯塔与潮" },
+    premise: "林守捡到一封没有寄信人的信。",
+  });
   return session.inspectFoundation({ prompt: "写一本三章短篇" });
+}
+
+/** MockLlm: generateFoundation reads JSON from `text`, not toolCalls. */
+export async function generateWithMockJson() {
+  const llm = new MockLlm([
+    {
+      text: JSON.stringify({
+        outline: [{ chapter: 1, title: "风暴之后", summary: "捡到信" }],
+        characters: [{ name: "林守", role: "主角" }],
+        world_rules: [{ name: "信与潮", description: "涨潮来信" }],
+      }),
+    },
+  ]);
+  const session = await createNovelSession({
+    store: new MemoryStore(),
+    llm,
+    bookId: "letter",
+  });
+  await session.upsertFoundation({
+    book: { title: "无主的信", synopsis: "灯塔与潮" },
+    premise: "林守捡到一封没有寄信人的信。",
+  });
+  await session.generateFoundation({
+    prompt: "写一本三章短篇",
+    keys: ["outline", "characters", "world_rules"],
+    mode: "fill_missing",
+  });
+  return session.startAutoWrite({
+    prompt: "写一本三章短篇",
+    requireConfirmGaps: true,
+  });
 }
 
 export async function twoBookWorkspace() {

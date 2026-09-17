@@ -4,11 +4,12 @@
 
 ### Added
 
-- **Optional `novel-engine/session` (0.3.0)** — same-thread host façade: `createNovelSession` / `createNovelWorkspace`. Read-through `getFoundation` / `inspectFoundation` / `assertReadyToWrite` / `listArtifacts`, plus snapshot wrappers. Multi-book workspace with one `StorePort` per `bookId` (`createStore` factory). Default `.` / `./worker` / `./llm` bundles do not import session. Docs: `docs/session.md` / `docs/session.zh-CN.md`. S2 `generateFoundation`, S3 ChapterRunner, S4 Worker session bridge are not in this release.
+- **Optional `novel-engine/session` (0.3.0)** — same-thread host façade: `createNovelSession` / `createNovelWorkspace`. S0/S1: `getFoundation` / `inspectFoundation` / `assertReadyToWrite` / workspace. **S2:** `upsertFoundation`, structured one-shot `generateFoundation` (JSON in `LlmPort.complete().text` → upsert; not an Engine loop), and `startAutoWrite` (optional generate, then `needs_foundation` or `createEngine().run`). `subscribe` for `foundation_updated` / `auto_write_step` / `stopped`. Default `.` / `./worker` / `./llm` bundles do not import session. Docs: `docs/session.md` / `docs/session.zh-CN.md`. S3 ChapterRunner and S4 Worker session bridge are not in this release.
 
 ### Fixed
 
 - **`foundationMissing`** — mid/long with a valid non-empty `layered_outline.json` (volume/arc shape) no longer requires a flat `outline.json`. Short tier still does. Optional `tier` argument; otherwise inferred from `run_meta.planningTier` / `progress.planningTier` / `progress.layered` / presence of a valid layered outline. Fingerprint skips a missing `outline.json` when the layered outline is valid so `novel_context` / `audit_foundation` still work.
+- **`StorePort.remove?`** — optional delete (`MemoryStore`, `OpfsStore`). Session uses it to drop a stale `meta/foundation_audit.json` after fingerprint files change.
 
 ## 0.2.0 — 2026-09-17
 

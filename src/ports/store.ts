@@ -24,4 +24,10 @@ export interface StorePort {
    * export then probes the known book layout via `has()`.
    */
   list?(prefix?: string): readonly string[] | Promise<readonly string[]>;
+  /**
+   * Optional delete. `MemoryStore` and `OpfsStore` implement this so Session
+   * can invalidate `meta/foundation_audit.json` after fingerprint files change.
+   * Missing paths are a no-op. Custom adapters may omit it.
+   */
+  remove?(path: string): Promise<void>;
 }

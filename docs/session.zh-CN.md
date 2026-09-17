@@ -1,4 +1,4 @@
-# 宿主 Session API（`novel-engine/session`）— S0 / S1
+# 宿主 Session API（`novel-engine/session`）— S0 / S1 / S2
 
 [English](session.md) | [中文文档](session.zh-CN.md)
 
@@ -8,7 +8,7 @@
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-包版本 **0.3.0**。本文只覆盖 **S0 + S1**。
+包版本 **0.3.0**。本文覆盖 **S0 + S1 + S2**。
 
 ## 状态
 
@@ -16,7 +16,7 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 | --- | --- | --- |
 | **S0** | 类型、缺口表、`foundationMissing` 分层大纲修复 | 已完成 |
 | **S1** | `createNovelSession` 只读/检查 + `createNovelWorkspace` | 已完成 |
-| **S2** | `generateFoundation` / upsert / 自动写作（结构化 LLM） | 尚未 |
+| **S2** | `generateFoundation` / upsert / 自动写作（结构化 LLM） | 已完成 |
 | **S3** | ChapterRunner / 章节写作 API | 尚未 |
 | **S4** | Worker session 桥 | 尚未 |
 
@@ -53,7 +53,7 @@ await session.inspectFoundation({ prompt: "写一本分层中篇：……" });
 await session.assertReadyToWrite();
 ```
 
-S1 里 `llm` 可选（未使用，仅为 S2 预留）。每次读取都是 **store 直读**（Session 不缓存产物）。
+S1 里 `llm` 对只读检查可选。**S2** 的 `generateFoundation` / `startAutoWrite` 必须提供（缺失则 `SessionLlmRequiredError`）。每次读取都是 **store 直读**（Session 不缓存产物）。
 
 | 方法 | 说明 |
 | --- | --- |
@@ -64,9 +64,13 @@ S1 里 `llm` 可选（未使用，仅为 S2 预留）。每次读取都是 **sto
 | `assertReadyToWrite({ prompt? })` | 未就绪时抛出带 `gaps` 的 `FoundationIncompleteError`。 |
 | `listArtifacts(prefix?)` | `listStorePaths`。 |
 | `exportSnapshot()` / `importSnapshot(bytes)` | 现有书稿快照 API 的薄封装。 |
+| `upsertFoundation(patch)` | 部分写入 `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules`。指纹文件变化时作废 `meta/foundation_audit.json`。 |
+| `generateFoundation({ prompt, keys, mode? })` | 结构化一次性 `LlmPort.complete`；从 `text` 解析 JSON；再 `upsertFoundation`。**不是** Engine 循环。 |
+| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | 可选 upsert/generate，然后要么 `{ status: "needs_foundation" }`，要么 `createEngine(...).run`。 |
+| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `stopped`。返回取消订阅函数。 |
 | `close()` | 之后的调用抛 `SessionClosedError`。 |
 
-**不在 S1：** `upsertFoundation`、`generateFoundation`、`startAutoWrite`、`chapter.*`。
+**不在 S2：** ChapterRunner / `chapter.*`（S3），Worker session 桥（S4）。
 
 `readyToWrite === true` 当且仅当 `foundationMissing` 为空（与 Engine 的审查 / writing 阶段规则一致）。
 
@@ -82,6 +86,52 @@ interface FoundationGap {
 ```
 
 中长篇若缺大纲，缺口指向 `layered_outline.json`，并说明扁平 `outline.json` 也可以满足要求。
+
+## S2 — 生成 / upsert / 自动写作
+
+`generateFoundation` 是**结构化的一次性 LLM 调用 + `upsertFoundation`**。它不跑受限的 Engine 循环，也不写章节或草稿。
+
+### `upsertFoundation(patch)`
+
+```ts
+await session.upsertFoundation({
+  book: { title: "无主的信", synopsis: "……" },
+  premise: "……",
+  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }],
+  characters: [{ name: "林守" }],
+  worldRules: [{ name: "信与潮", description: "……" }],
+});
+```
+
+轻度形状校验后，按现有 `PATHS` 调用 `writeJson` / `writeText`。任何指纹文件（`book`、`premise`、`outline`、`characters`、`world_rules`、`layered_outline`）的写入都会**作废** `meta/foundation_audit.json`（若实现了 `StorePort.remove` 则删除；否则写入已清空的审查记录）。返回最新的 `getFoundation()`。
+
+### `generateFoundation({ prompt, keys, mode? })`
+
+- `keys`：`book | premise | outline | layered_outline | characters | world_rules` 的子集
+- `mode`：`fill_missing`（默认，只填 `inspectFoundation` 仍缺的键）或 `overwrite`
+- `createNovelSession` 必须带 `llm`
+- 一次 `LlmPort.complete`，**不带 tools**。模型必须在 **`text` 里返回 JSON 对象**（允许包一层 ` ```json `）。解析后交给 `upsertFoundation`。
+- MockLlm：`{ text: JSON.stringify({ premise: "…", outline: [/* … */] }) }`
+
+### `startAutoWrite`
+
+```ts
+const outcome = await session.startAutoWrite({
+  prompt: "写一本三章短篇：……",
+  foundation: { book: { title: "无主的信", synopsis: "……" } },
+  generateMissing: true,
+  requireConfirmGaps: true, // 默认
+  maxSteps: 20,
+});
+```
+
+1. 可选 `foundation` → `upsertFoundation`
+2. 可选 `generateMissing: true` → `generateFoundation({ prompt, keys: 缺项, mode: "fill_missing" })`
+3. `inspectFoundation({ prompt })`
+4. 若 `requireConfirmGaps !== false`（默认 **true**）且 `gaps.length > 0` → `{ status: "needs_foundation", gaps, meta }`，**不**调用 `Engine.run`
+5. 若已就绪（或关闭了确认）→ `createEngine({ store, llm }).run({ prompt, maxSteps })` → `{ status: "completed" | "stopped", result, meta }`（`stoppedReason === "complete"` 时为 `completed`）
+
+`subscribe` 在 upsert 后发出 `foundation_updated`，每个 Engine `step` 发出 `auto_write_step`，needs-foundation 与 Engine 结束都发出 `stopped`。
 
 ## S1 — `NovelWorkspace`
 
@@ -122,13 +172,14 @@ await ws.close();
 | 错误 | 何时 |
 | --- | --- |
 | `FoundationIncompleteError` | `assertReadyToWrite` — `.gaps` 即检查表。 |
+| `SessionLlmRequiredError` | `generateFoundation` / Engine 版 `startAutoWrite` 未提供 `llm`。 |
+| `FoundationGenerateError` | 非法 `keys`，或 `complete().text` 不是 JSON 对象。 |
 | `SessionClosedError` | 对已关闭 session 调用（包括 `switchTo` 之后）。 |
 | `WorkspaceClosedError` | 工作区 `close()` 之后。 |
 | `BookNotFoundError` | `open` / `switchTo` 未知 `bookId`。 |
 
 ## 后续
 
-- **S2** — 结构化 LLM 的 `generateFoundation` / upsert / 自动写作
 - **S3** — ChapterRunner
 - **S4** — Worker session 桥
 

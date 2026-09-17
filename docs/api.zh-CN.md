@@ -15,7 +15,7 @@
 | `.` | `dist/index.js` | Engine、`route`、领域类型、stores、mocks、主线程 client、书籍快照 |
 | `./worker` | `dist/worker.js` | `attachEngineWorker`，以及供专用 Worker 使用的 Engine / stores / snapshot |
 | `./llm` | `dist/llm.js` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope）。不会打进 `.` 或 `./worker`。 |
-| `./session` | `dist/session.js` | 可选同线程宿主 Session（S0/S1 检查 + 工作区）。不会打进 `.` / `./worker` / `./llm`。 |
+| `./session` | `dist/session.js` | 可选同线程宿主 Session（S0–S2 检查、生成、自动写作、工作区）。不会打进 `.` / `./worker` / `./llm`。 |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
@@ -89,7 +89,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 | `OpfsUnavailableError` | class | 严格 open 时抛出。 |
 | `PATHS` | const | 逻辑布局（`meta/progress.json`、`outline.json` 等）。 |
 
-`MemoryStore` 和 `OpfsStore` 实现了 `list()`，因此快照导出会包含每个文件。自定义适配器可以省略 `list`；导出时会探测已知书籍布局。
+`MemoryStore` 和 `OpfsStore` 实现了 `list()`，因此快照导出会包含每个文件。自定义适配器可以省略 `list`；导出时会探测已知书籍布局。可选 `remove(path)` 删除路径（缺失则为空操作）；Session 用它作废过期的 foundation audit。
 
 见 [场景 3（浏览器持久化）](../README.zh-CN.md#scenario-opfs)。
 
@@ -139,20 +139,24 @@ tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放�
 
 ## 可选宿主 Session（`novel-engine/session`）
 
-不属于 `.`、`./worker` 或 `./llm`。同线程检查 + 多书工作区（S0/S1）。指南：[session.zh-CN.md](session.zh-CN.md)（[English](session.md)）。场景：[README §7](../README.zh-CN.md#scenario-session)。
+不属于 `.`、`./worker` 或 `./llm`。同线程检查、S2 生成/upsert/自动写作，以及多书工作区。指南：[session.zh-CN.md](session.zh-CN.md)（[English](session.md)）。场景：[README §7](../README.zh-CN.md#scenario-session)。
 
 | 导出 | 种类 | 说明 |
 | --- | --- | --- |
-| `createNovelSession({ store, llm?, bookId })` | fn | 同线程 session。S1 中 `llm` 未使用（为 S2 预留）。 |
-| `NovelSession` | type | `getFoundation` / `getProgress` / `inspectFoundation` / `assertReadyToWrite` / `listArtifacts` / 快照封装 / `close`。 |
+| `createNovelSession({ store, llm?, bookId })` | fn | 同线程 session。S2 的 generate / auto-write 需要 `llm`。 |
+| `NovelSession` | type | 检查 + `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `subscribe` / 快照封装 / `close`。 |
 | `createNovelWorkspace({ createStore, llm?, indexStore? })` | fn | 每个 `bookId` 一个 store。可选 `indexStore` 持久化 `_index.json`。 |
 | `NovelWorkspace` | type | `createBook` / `open` / `switchTo` / `listBooks` / `close` / `currentBookId`。 |
 | `FoundationMeta` / `FoundationGap` / `InspectResult` / `PlanningInfo` | types | 检查载荷。缺口含中英短提示。 |
+| `FoundationPatch` / `FoundationKey` / `FOUNDATION_KEYS` / `GenerateFoundationOptions` / `StartAutoWriteOptions` / `AutoWriteResult` / `SessionEvent` | types | S2 生成 / 自动写作。 |
 | `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`。 |
+| `SessionLlmRequiredError` / `FoundationGenerateError` | class | 缺少 `llm`；非法 generate JSON / keys。 |
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | 已关闭的 session/工作区；未知 `bookId`。 |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`。 |
 
-**不在 S1：** `generateFoundation`、upsert、自动写作、ChapterRunner、Worker session 桥（S2–S4）。
+**不在 S2：** ChapterRunner、Worker session 桥（S3–S4）。
+
+`generateFoundation` 要求 `LlmPort.complete` 在 **`text` 里返回 JSON**（不新增 tools）。默认 `fill_missing` 只 upsert 仍缺的键。
 
 示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)。
 

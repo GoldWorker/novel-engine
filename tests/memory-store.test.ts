@@ -105,4 +105,11 @@ describe("MemoryStore", () => {
     expect(store.list("meta/")).toEqual(["meta/note.txt"]);
     expect(await store.readText("meta/note.txt")).toBe("ok");
   });
+
+  it("remove() deletes a path and is a no-op when missing", async () => {
+    const store = new MemoryStore({ "meta/note.txt": "ok" });
+    await store.remove("meta/note.txt");
+    expect(await store.has("meta/note.txt")).toBe(false);
+    await store.remove("meta/note.txt");
+  });
 });

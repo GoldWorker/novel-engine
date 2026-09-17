@@ -70,6 +70,15 @@ describe("OpfsStore CRUD (in-memory OPFS shim)", () => {
     expect(await port.has(PATHS.progress)).toBe(true);
   });
 
+  it("remove() deletes a path", async () => {
+    const fake = createFakeOpfs();
+    const store = await OpfsStore.open({ root: fake.root, directory: "" });
+    await store.write("notes/hello.txt", "灯塔");
+    await store.remove("notes/hello.txt");
+    expect(await store.has("notes/hello.txt")).toBe(false);
+    await store.remove("notes/hello.txt");
+  });
+
   it("returns null for missing paths and copies bytes on read", async () => {
     const fake = createFakeOpfs();
     const store = await OpfsStore.open({ root: fake.root, directory: "" });
