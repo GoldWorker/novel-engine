@@ -12,7 +12,7 @@ Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/
 
 Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)). Session: [docs/session.md](docs/session.md).
 
-**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm) · [host session](#scenario-session) · [session over Worker](#scenario-session-worker). Runnable sources stay in [`examples/`](examples/).
+**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm) · [host session](#scenario-session) ([gaps](#scenario-session-gaps) · [foundation](#scenario-session-foundation) · [chapter write](#scenario-session-chapter) · [read meta](#scenario-session-read) · [TOC & chapters](#scenario-session-toc) · [switch books](#scenario-session-workspace)) · [session over Worker](#scenario-session-worker). Runnable sources stay in [`examples/`](examples/).
 
 ## What's not included
 
@@ -75,7 +75,7 @@ Scenarios compose: the Worker example already calls `createOpfsStore()`; snapsho
 | [4. Embed in a Web Worker](#scenario-worker) | Dedicated worker + main-thread client: `start` / `steer` / `pause` / `resume` / `snapshot`. | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. Book snapshot export / import](#scenario-snapshot) | Zip every store path (fflate) and merge-restore into another `StorePort`. | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. Inject a real LLM](#scenario-llm) | Host-side OpenAI / Anthropic / DashScope `LlmPort` via optional `novel-engine/llm`. Keys belong on a BFF. | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
-| [7. Host session (inspect + generate + ChapterRunner + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace`: foundation gaps, structured JSON generate, optional Engine auto-write, single-chapter ChapterRunner. | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
+| [7. Host session (inspect + generate + ChapterRunner + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace`: [gap check](#scenario-session-gaps), [foundation upsert/generate](#scenario-session-foundation), [single-chapter write](#scenario-session-chapter), [read latest meta](#scenario-session-read), [TOC & chapters](#scenario-session-toc), [switch books / restore](#scenario-session-workspace). | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
 | [8. Session over Worker](#scenario-session-worker) | Workbench: `startAutoWrite` / `chapter.write` off the UI thread. `createSessionClient` + `attachSessionWorker`. `LlmPort` fetches a BFF — no vendor keys in the worker. | [`session.worker.ts`](examples/session.worker.ts) + [`session-host.ts`](examples/session-host.ts) |
 
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
@@ -336,7 +336,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 **When:** A same-thread host wants to inspect whether a store is ready to write, fill foundation via a structured LLM JSON call, write or rewrite a single chapter, or switch among several books.
 
-Optional subpath. S0–S3: `getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. `generateFoundation` is **one-shot JSON in `LlmPort.complete().text`**, not an Engine loop. `chapter.write` is a **dedicated writer loop** (reuses writer tools; not `Engine.run` / not `pendingRewrites`). Worker off-thread: [scenario 8](#scenario-session-worker).
+Optional subpath. S0–S3: `getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. `generateFoundation` is **one-shot JSON in `LlmPort.complete().text`**, not an Engine loop. `chapter.write` is a **dedicated writer loop** (reuses writer tools; not `Engine.run` / not `pendingRewrites`). `startAutoWrite` and `chapter.write` share a busy flag (`SessionBusyError`). Worker off-thread: [scenario 8](#scenario-session-worker).
 
 Details: [docs/session.md](docs/session.md) ([中文](docs/session.zh-CN.md)). Sketch: [`examples/session-workspace.ts`](examples/session-workspace.ts).
 
@@ -346,30 +346,194 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 
 const store = new MemoryStore();
 const session = await createNovelSession({ store, llm, bookId: "letter" });
-const inspected = await session.inspectFoundation({ prompt: "写一本三章短篇" });
-await session.upsertFoundation({ book: { title: "无主的信", synopsis: "……" } });
-// generateFoundation parses JSON from complete().text (MockLlm-friendly)
+```
+
+<a id="scenario-session-gaps"></a>
+
+#### 7.1 Auto-write: inspect gaps and prompt to fill
+
+Keep `requireConfirmGaps: true` (default). If anything is missing, `startAutoWrite` returns early with `needs_foundation` and does **not** run the Engine — use `gaps[].hint` in the UI.
+
+```ts
 const outcome = await session.startAutoWrite({
   prompt: "写一本三章短篇：……",
-  generateMissing: true,
-  requireConfirmGaps: true,
+  requireConfirmGaps: true, // default
 });
-// outcome.status === "needs_foundation" until audit / writing phase is ready
-await session.chapter.write({ chapter: 1, mode: "create", title: "风暴之后" });
 
+if (outcome.status === "needs_foundation") {
+  for (const gap of outcome.gaps) {
+    // gap.key / gap.path / gap.hint — e.g. book, premise, outline, characters…
+  }
+  return;
+}
+// outcome.status === "completed" | "stopped"
+
+// Or inspect without writing:
+const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "……" });
+```
+
+<a id="scenario-session-foundation"></a>
+
+#### 7.2 Custom or LLM-generated foundation before auto-write
+
+**Custom** (form / host data) → `upsertFoundation`. **LLM fill** → `generateFoundation` (one-shot JSON in `complete().text`; `mode: "fill_missing"` | `"overwrite"`). Or fold both into `startAutoWrite`.
+
+```ts
+await session.upsertFoundation({
+  book: { title: "无主的信", synopsis: "……" },
+  premise: "……",
+  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }],
+  characters: [{ name: "林守" }],
+  worldRules: [{ name: "信与潮", description: "……" }],
+});
+
+await session.generateFoundation({
+  prompt: "写一本三章短篇：……",
+  keys: ["outline", "characters", "world_rules"], // also: book | premise | layered_outline
+  mode: "fill_missing", // default; use "overwrite" to replace
+});
+
+await session.startAutoWrite({
+  prompt: "……",
+  foundation: { book: { title: "无主的信", synopsis: "……" } }, // upsert first
+  generateMissing: true, // then generate remaining gaps
+  requireConfirmGaps: true, // still return needs_foundation if anything left
+});
+```
+
+Fingerprint file changes invalidate `foundation_audit`. Mid/long can supply `layeredOutline` instead of flat `outline`.
+
+<a id="scenario-session-chapter"></a>
+
+#### 7.3 Single-chapter create / continue / rewrite / polish
+
+`session.chapter` is a dedicated writer loop — not full-book `Engine.run`.
+
+| Intent | `mode` | Prerequisite |
+| --- | --- | --- |
+| New chapter | `create` | No final (or `force: true`) |
+| Continue draft | `continue` | Draft exists, no final |
+| Rewrite finished chapter | `rewrite` | Final exists + `instruction` |
+| Light polish | `polish` | Final exists |
+
+```ts
+const view = await session.chapter.get(1); // plan / draft / final / summary, or null
+
+await session.chapter.write({
+  chapter: 1,
+  mode: "create", // | "continue" | "rewrite" | "polish"
+  title: "风暴之后",
+  instruction: "灯塔视角",
+});
+
+// Host-authored final, no LLM:
+await session.chapter.saveFinal(1, "# 风暴之后\n\n……");
+```
+
+<a id="scenario-session-read"></a>
+
+#### 7.4 Read the latest foundation metadata
+
+Session does **not** cache artifacts — every call reads the store.
+
+```ts
+const foundation = await session.getFoundation();
+// { book, premise, outline, layeredOutline, characters, worldRules, audit, progress }
+// missing files → null fields
+
+const progress = await session.getProgress();
+session.subscribe((event) => {
+  // foundation_updated | auto_write_step | chapter_step | stopped
+});
+```
+
+`upsertFoundation` / `generateFoundation` also return the latest `FoundationMeta`.
+
+<a id="scenario-session-toc"></a>
+
+#### 7.5 Read outline / TOC and chapters
+
+There is no separate “TOC API”: the outline lives in `getFoundation()`, and chapter bodies are loaded with `chapter.get(n)`. Helpers come from `novel-engine`.
+
+**Outline / TOC**
+
+```ts
+import { flattenOutline, latestCompleted, nextChapter } from "novel-engine";
+
+const { outline, layeredOutline, progress } = await session.getFoundation();
+
+// Short: flat outline [{ chapter, title, summary? }, ...]
+outline;
+
+// Mid/long: volume/arc layered outline; flatten to chapter list when needed
+layeredOutline;
+const flat = layeredOutline ? flattenOutline(layeredOutline) : (outline ?? []);
+
+// On-disk final paths (e.g. chapters/01.md)
+const finals = await session.listArtifacts("chapters/");
+```
+
+**Load a chapter by number**
+
+```ts
+const view = await session.chapter.get(1);
+if (view == null) {
+  // no plan / draft / final / summary yet
+} else {
+  view.chapter; // 1
+  view.plan;    // chapter plan, or null
+  view.draft;   // draft markdown, or null
+  view.final;   // final markdown, or null
+  view.summary; // summary, or null
+}
+```
+
+Chapter numbers start at **1**. Returns `null` only when all four fields are absent; otherwise a `ChapterView`.
+
+**Latest completed / next chapter**
+
+```ts
+const progress = await session.getProgress();
+const n = latestCompleted(progress!); // max completed chapter; 0 if none
+const latest = n > 0 ? await session.chapter.get(n) : null;
+const next = nextChapter(progress!);  // n + 1
+
+// In progress (may only have a draft):
+const current = progress?.currentChapter;
+const inProgress = current ? await session.chapter.get(current) : null;
+```
+
+<a id="scenario-session-workspace"></a>
+
+#### 7.6 Switch books and restore context
+
+`createNovelWorkspace`: one `StorePort` per `bookId`. State lives in the store (foundation, progress, chapters), not in the in-memory session object. `switchTo` / `open` **closes** the previous session — discard the old reference (`SessionClosedError` if reused).
+
+```ts
 const stores = new Map<string, MemoryStore>();
 const ws = createNovelWorkspace({
   createStore(bookId) {
+    // Must cache: same bookId → same persistent store (Memory / OPFS / custom)
     const existing = stores.get(bookId);
     if (existing) return existing;
     const next = new MemoryStore();
     stores.set(bookId, next);
     return next;
   },
+  // indexStore: optional — persists _index.json (book list + currentBookId)
+  llm,
 });
+
 await ws.createBook({ bookId: "a", title: "无主的信" });
-await ws.switchTo("a");
+await ws.createBook({ bookId: "b", title: "两弧灯塔" });
+
+const sessionA = await ws.switchTo("a"); // closes previous session
+const restored = await sessionA.getFoundation(); // read back from that book's store
+await sessionA.chapter.get(1);
+await sessionA.getProgress();
 ```
+
+Cold start with `indexStore`: `listBooks()` restores the catalog but does **not** auto-open — call `open` / `switchTo` again. For browser persistence, point `createStore` at OPFS (or a per-book subdirectory). There is no Workspace-over-Worker — keep the workspace on the UI thread; use one session Worker per book if needed ([scenario 8](#scenario-session-worker)).
 
 <a id="scenario-session-worker"></a>
 

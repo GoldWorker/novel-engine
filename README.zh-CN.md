@@ -12,7 +12,7 @@
 
 稳定导出见 [docs/api.zh-CN.md](docs/api.zh-CN.md)（[English API](docs/api.md)）。Session：[docs/session.zh-CN.md](docs/session.zh-CN.md)。
 
-**怎么用？** 先看 [使用场景](#使用场景) — [短篇完结](#scenario-short-book) · [分层中长篇](#scenario-layered-book) · [浏览器持久化](#scenario-opfs) · [Web Worker](#scenario-worker) · [书稿快照](#scenario-snapshot) · [真实 LLM 适配器](#scenario-llm) · [宿主 Session](#scenario-session) · [Worker 上的 Session](#scenario-session-worker)。可跑通的源码在 [`examples/`](examples/)。
+**怎么用？** 先看 [使用场景](#使用场景) — [短篇完结](#scenario-short-book) · [分层中长篇](#scenario-layered-book) · [浏览器持久化](#scenario-opfs) · [Web Worker](#scenario-worker) · [书稿快照](#scenario-snapshot) · [真实 LLM 适配器](#scenario-llm) · [宿主 Session](#scenario-session)（[缺口检查](#scenario-session-gaps) · [基础设定](#scenario-session-foundation) · [单章写作](#scenario-session-chapter) · [读元信息](#scenario-session-read) · [目录与章节](#scenario-session-toc) · [切书恢复](#scenario-session-workspace)）· [Worker 上的 Session](#scenario-session-worker)。可跑通的源码在 [`examples/`](examples/)。
 
 ## 不包含什么
 
@@ -75,7 +75,7 @@ npm install novel-engine
 | [4. 嵌入 Web Worker](#scenario-worker) | 专用 Worker + 主线程 client：`start` / `steer` / `pause` / `resume` / `snapshot`。 | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. 书稿快照导入导出](#scenario-snapshot) | 把 store 中每个路径打成 zip（fflate），再 merge 进另一个 `StorePort`。 | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. 注入真实 LLM](#scenario-llm) | 宿主侧通过可选的 `novel-engine/llm` 得到 OpenAI / Anthropic / DashScope 的 `LlmPort`。密钥放在 BFF。 | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
-| [7. 宿主 Session（检查 + 生成 + ChapterRunner + 工作区）](#scenario-session) | 同线程 `NovelSession` / `NovelWorkspace`：基础设定缺口、结构化 JSON 生成、可选 Engine 自动写作、单章 ChapterRunner。 | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
+| [7. 宿主 Session（检查 + 生成 + ChapterRunner + 工作区）](#scenario-session) | 同线程 `NovelSession` / `NovelWorkspace`：[缺口检查](#scenario-session-gaps)、[设定 upsert/生成](#scenario-session-foundation)、[单章写作](#scenario-session-chapter)、[读最新元信息](#scenario-session-read)、[目录与章节](#scenario-session-toc)、[切书 / 恢复](#scenario-session-workspace)。 | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
 | [8. Worker 上的 Session](#scenario-session-worker) | 工作台：把 `startAutoWrite` / `chapter.write` 移出 UI 线程。`createSessionClient` + `attachSessionWorker`。`LlmPort` fetch BFF——Worker 里不放供应商密钥。 | [`session.worker.ts`](examples/session.worker.ts) + [`session-host.ts`](examples/session-host.ts) |
 
 `plan_start` 是**确定性桩**（无 Arbiter LLM）：提示词含 `长篇` 则选 `architect_long` / `long`；含 `中篇` 或 `分层` 则选 `architect_long` / `mid`；否则 `architect_short` / `short`。Worker 失败会重试一次，然后暂停。同一条 Route 指令连续五次也会暂停（死锁上限）。
@@ -336,7 +336,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 **何时：** 同线程宿主想检查一份 store 是否写得动，用结构化 LLM JSON 补齐基础设定，单章写作或重写，或在多本书之间切换。
 
-可选子路径。S0–S3：`getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / 工作区 `createBook` / `switchTo`。中长篇只要有有效的 `layered_outline.json`，不再需要扁平 `outline.json`。`generateFoundation` 是 **`LlmPort.complete().text` 里的一次性 JSON**，不是 Engine 循环。`chapter.write` 是**专用作者循环**（复用 writer 工具；不是 `Engine.run` / 不是 `pendingRewrites`）。离主线程：见 [场景 8](#scenario-session-worker)。
+可选子路径。S0–S3：`getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / 工作区 `createBook` / `switchTo`。中长篇只要有有效的 `layered_outline.json`，不再需要扁平 `outline.json`。`generateFoundation` 是 **`LlmPort.complete().text` 里的一次性 JSON**，不是 Engine 循环。`chapter.write` 是**专用作者循环**（复用 writer 工具；不是 `Engine.run` / 不是 `pendingRewrites`）。`startAutoWrite` 与 `chapter.write` 共用 busy 标志（`SessionBusyError`）。离主线程：见 [场景 8](#scenario-session-worker)。
 
 详情：[docs/session.zh-CN.md](docs/session.zh-CN.md)（[English](docs/session.md)）。示意：[`examples/session-workspace.ts`](examples/session-workspace.ts)。
 
@@ -346,30 +346,194 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 
 const store = new MemoryStore();
 const session = await createNovelSession({ store, llm, bookId: "letter" });
-const inspected = await session.inspectFoundation({ prompt: "写一本三章短篇" });
-await session.upsertFoundation({ book: { title: "无主的信", synopsis: "……" } });
-// generateFoundation 从 complete().text 解析 JSON（MockLlm 友好）
+```
+
+<a id="scenario-session-gaps"></a>
+
+#### 7.1 自动写作：检查缺口并提示补齐
+
+保持 `requireConfirmGaps: true`（默认）。若有缺失，`startAutoWrite` 早退为 `needs_foundation`，**不会**跑 Engine——用 `gaps[].hint` 驱动 UI。
+
+```ts
 const outcome = await session.startAutoWrite({
   prompt: "写一本三章短篇：……",
-  generateMissing: true,
-  requireConfirmGaps: true,
+  requireConfirmGaps: true, // 默认
 });
-// 在审查 / writing 阶段就绪之前，outcome.status === "needs_foundation"
-await session.chapter.write({ chapter: 1, mode: "create", title: "风暴之后" });
 
+if (outcome.status === "needs_foundation") {
+  for (const gap of outcome.gaps) {
+    // gap.key / gap.path / gap.hint — 如 book、premise、outline、characters…
+  }
+  return;
+}
+// outcome.status === "completed" | "stopped"
+
+// 也可只检查、不写作：
+const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "……" });
+```
+
+<a id="scenario-session-foundation"></a>
+
+#### 7.2 自动写作前：自定义或 LLM 生成基础元信息
+
+**自定义**（表单 / 宿主已有数据）→ `upsertFoundation`。**LLM 补齐** → `generateFoundation`（一次性 `complete().text` JSON；`mode: "fill_missing"` | `"overwrite"`）。也可一并塞进 `startAutoWrite`。
+
+```ts
+await session.upsertFoundation({
+  book: { title: "无主的信", synopsis: "……" },
+  premise: "……",
+  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }],
+  characters: [{ name: "林守" }],
+  worldRules: [{ name: "信与潮", description: "……" }],
+});
+
+await session.generateFoundation({
+  prompt: "写一本三章短篇：……",
+  keys: ["outline", "characters", "world_rules"], // 也可：book | premise | layered_outline
+  mode: "fill_missing", // 默认；全量覆盖用 "overwrite"
+});
+
+await session.startAutoWrite({
+  prompt: "……",
+  foundation: { book: { title: "无主的信", synopsis: "……" } }, // 先 upsert
+  generateMissing: true, // 再对剩余缺口 generate
+  requireConfirmGaps: true, // 仍缺则返回 needs_foundation
+});
+```
+
+指纹文件变更会作废 `foundation_audit`。中长篇可用 `layeredOutline` 代替扁平 `outline`。
+
+<a id="scenario-session-chapter"></a>
+
+#### 7.3 单章创建 / 续写 / 改写 / 打磨
+
+`session.chapter` 是专用作者循环——不是全书 `Engine.run`。
+
+| 意图 | `mode` | 前置条件 |
+| --- | --- | --- |
+| 新建章 | `create` | 无终稿（或 `force: true`） |
+| 续写草稿 | `continue` | 有草稿、无终稿 |
+| 重写已完成章 | `rewrite` | 有终稿 + `instruction` |
+| 轻度打磨 | `polish` | 有终稿 |
+
+```ts
+const view = await session.chapter.get(1); // plan / draft / final / summary，全无则 null
+
+await session.chapter.write({
+  chapter: 1,
+  mode: "create", // | "continue" | "rewrite" | "polish"
+  title: "风暴之后",
+  instruction: "灯塔视角",
+});
+
+// 宿主手写终稿、不调 LLM：
+await session.chapter.saveFinal(1, "# 风暴之后\n\n……");
+```
+
+<a id="scenario-session-read"></a>
+
+#### 7.4 获取最新的基础元信息
+
+Session **不缓存**产物——每次都是 store 直读。
+
+```ts
+const foundation = await session.getFoundation();
+// { book, premise, outline, layeredOutline, characters, worldRules, audit, progress }
+// 缺文件对应字段为 null
+
+const progress = await session.getProgress();
+session.subscribe((event) => {
+  // foundation_updated | auto_write_step | chapter_step | stopped
+});
+```
+
+`upsertFoundation` / `generateFoundation` 的返回值也是最新的 `FoundationMeta`。
+
+<a id="scenario-session-toc"></a>
+
+#### 7.5 获取目录结构与对应章节
+
+没有单独的「目录 API」：大纲在 `getFoundation()`，正文按章号用 `chapter.get(n)`。辅助函数从 `novel-engine` 导入。
+
+**目录 / 大纲**
+
+```ts
+import { flattenOutline, latestCompleted, nextChapter } from "novel-engine";
+
+const { outline, layeredOutline, progress } = await session.getFoundation();
+
+// 短篇：扁平大纲 [{ chapter, title, summary? }, ...]
+outline;
+
+// 中长篇：卷/弧分层大纲；可展平成章列表
+layeredOutline;
+const flat = layeredOutline ? flattenOutline(layeredOutline) : (outline ?? []);
+
+// 已落盘的终稿路径（如 chapters/01.md）
+const finals = await session.listArtifacts("chapters/");
+```
+
+**按章号读取对应章节**
+
+```ts
+const view = await session.chapter.get(1);
+if (view == null) {
+  // 该章尚无 plan / draft / final / summary
+} else {
+  view.chapter; // 1
+  view.plan;    // 章节计划，或 null
+  view.draft;   // 草稿 markdown，或 null
+  view.final;   // 终稿 markdown，或 null
+  view.summary; // 摘要，或 null
+}
+```
+
+章节号从 **1** 起。四个字段都没有时返回 `null`；有任一产物就返回 `ChapterView`。
+
+**最新已完成章 / 下一章**
+
+```ts
+const progress = await session.getProgress();
+const n = latestCompleted(progress!); // 已完成章号最大值；没有则为 0
+const latest = n > 0 ? await session.chapter.get(n) : null;
+const next = nextChapter(progress!);  // n + 1
+
+// 正在写、可能只有草稿：
+const current = progress?.currentChapter;
+const inProgress = current ? await session.chapter.get(current) : null;
+```
+
+<a id="scenario-session-workspace"></a>
+
+#### 7.6 小说切换与上下文状态恢复
+
+`createNovelWorkspace`：一书一个 `StorePort`。状态在 store 里（设定、进度、章节），不在 session 对象内存里。`switchTo` / `open` 会 **关闭** 上一份 session——旧引用必须丢弃（再调会 `SessionClosedError`）。
+
+```ts
 const stores = new Map<string, MemoryStore>();
 const ws = createNovelWorkspace({
   createStore(bookId) {
+    // 必须缓存：同一 bookId → 同一持久化 store（Memory / OPFS / 自实现）
     const existing = stores.get(bookId);
     if (existing) return existing;
     const next = new MemoryStore();
     stores.set(bookId, next);
     return next;
   },
+  // indexStore: 可选 — 持久化 _index.json（书目 + currentBookId）
+  llm,
 });
+
 await ws.createBook({ bookId: "a", title: "无主的信" });
-await ws.switchTo("a");
+await ws.createBook({ bookId: "b", title: "两弧灯塔" });
+
+const sessionA = await ws.switchTo("a"); // 关闭上一份 session
+const restored = await sessionA.getFoundation(); // 从该书 store 读回
+await sessionA.chapter.get(1);
+await sessionA.getProgress();
 ```
+
+有 `indexStore` 时冷启动：`listBooks()` 可恢复书目，但**不会自动 open**——需再调 `open` / `switchTo`。浏览器持久化时把 `createStore` 接到 OPFS（或按 bookId 分子目录）。没有 Workspace-over-Worker——工作区留在 UI 线程；需要时每本书一个 session Worker（[场景 8](#scenario-session-worker)）。
 
 <a id="scenario-session-worker"></a>
 
