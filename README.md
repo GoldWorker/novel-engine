@@ -2,9 +2,9 @@
 
 Reusable **TypeScript** Novel Engine SDK. Pure frontend-capable (ESM), no UI, no React bindings, no TUI.
 
-Phase 0 is a **Ports & Adapters** core: domain types, a pure `route` function, and injection ports. Host apps (browser, Node, workers) will later supply storage and LLM adapters. This package never talks to a real model and never touches `node:fs` in library runtime source.
+Phase 1 adds a **runnable Engine**: in-memory `StorePort` + scripted `LlmPort` adapters drive `route` and a thin Worker tool-loop until a short book reaches `phase=complete`. This package never talks to a real model and never touches `node:fs` in library runtime source.
 
-Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli) (`internal/flow/router.go`, `internal/domain`).
+Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli) (`internal/flow/router.go`, `internal/host/engine.go`).
 
 ## Ports & Adapters
 
@@ -16,34 +16,52 @@ Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/
                │ inject        │ inject
                ▼               ▼
 ┌─────────────────────────────────────────────┐
-│  novel-engine (this package)                │
-│   domain  ·  route(state) → Instruction     │
-│   StorePort / LlmPort  (interfaces only)    │
+│  novel-engine                               │
+│   MemoryStore / MockLlm  (test adapters)    │
+│   Engine.run → route(state) → Worker tools  │
+│   domain  ·  StorePort / LlmPort            │
 └─────────────────────────────────────────────┘
 ```
 
 - **`route` is a pure function.** Input is an explicit `State` snapshot. It performs no IO and does not call `StorePort` or `LlmPort`.
-- **`StorePort`** is how a future Engine will load that snapshot (OPFS, IndexedDB, in-memory, or Node fs *outside* this library).
-- **`LlmPort`** is how a future Engine will run architect / writer / editor completions. Phase 0 does not implement the Engine loop.
+- **`StorePort`** loads that snapshot and persists artifacts (Progress, foundation, drafts, checkpoints, decisions). Hosts inject memory, OPFS, IndexedDB, or Node fs *outside* this library.
+- **`LlmPort`** runs architect / writer / editor completions (optional structured `toolCalls`). The library ships `MockLlm` / `ReplayLlm` only — no provider clients.
 
-Until Engine exists, hosts can still:
-
-1. Assemble a `State` from their own storage.
-2. Call `route(state)`.
-3. Dispatch the returned `Instruction` (or handle `null`).
-
-## Phase 0 contents
+## Phase 1 contents
 
 | Export | Role |
 | --- | --- |
-| `Phase`, `canTransitionPhase`, `validatePhaseTransition` | Forward-only: `init → premise → outline → writing → complete` |
-| `Flow`, `canTransitionFlow`, `validateFlowTransition` | Writing-period flows; illegal jumps (e.g. `rewriting → reviewing`) fail |
-| `PlanningTier`, `plannerForTier` | `short → architect_short`; `mid` / `long → architect_long` |
-| `Progress`, `nextChapter`, `latestCompleted` | Facts `route` needs |
+| `createEngine` / `Engine` | Serial loop: load state → `route` → Worker → repeat until complete / max steps |
+| `MemoryStore` | In-memory `StorePort` (path → JSON/bytes) |
+| `MockLlm` / `ReplayLlm` | Scripted / fixture `LlmPort` for tests |
 | `route(state)` | Deterministic next `Instruction \| null` |
-| `StorePort`, `LlmPort` | Injection contracts only — no implementations |
+| `Phase` / `Flow` validators | Forward-only Phase; illegal Flow jumps fail |
+| `StorePort` / `LlmPort` | Injection contracts |
 
-**Not in Phase 0:** Engine loop, Workers tool-loop, Arbiter, OPFS, Web Worker wrapper, real LLM clients, UI.
+**Not in Phase 1:** real LLM clients, OPFS, Web Worker wrapper, Arbiter semantic scenes, ChapterAdvanceGate review mode, UI.
+
+## Host injection
+
+```ts
+import { createEngine, MemoryStore, MockLlm } from "novel-engine";
+
+const store = new MemoryStore();
+const llm = new MockLlm([
+  { text: "done" }, // or { toolCalls: [{ id, name, arguments }] }
+]);
+
+const engine = createEngine({ store, llm, maxSteps: 40 });
+const result = await engine.run({ prompt: "写一本三章短篇：……" });
+// result.stoppedReason === "complete" | "idle" | "paused" | "max_steps"
+```
+
+A real host swaps the adapters:
+
+1. Implement `StorePort` (`loadState` / `read` / `write` / Progress helpers) over OPFS or IndexedDB.
+2. Implement `LlmPort.complete` against your gateway / WebLLM. Return `toolCalls` when the model wants `save_book`, `save_foundation`, `plan_chapter`, `draft_chapter`, `commit_chapter`, etc.
+3. Call `createEngine({ store, llm }).run({ prompt })`.
+
+`plan_start` is a **deterministic stub** in Phase 1: short books always pick `architect_short` (no Arbiter LLM). Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
 
 ## Install / develop
 
@@ -69,55 +87,23 @@ Priority is first-match, matching ainovel-cli `internal/flow/router.go`:
 7. Immediate external feedback → architect
 8. Layered arc-end → review / summary / expand / new volume
 9. Non-layered global review due → editor
-10. Non-layered outline exhausted → architect
+10. Non-layered outline exhausted → architect (`complete_book` / continue)
 11. Else → writer next chapter
 
-`null` is valid: the host should summarize, wait for the user, or run a semantic bootstrap (planner selection) — Route does not guess.
+`null` is valid: Engine then tries the plan_start stub, or stops (`complete` / `idle`).
 
 ## Public API
 
 ```ts
 import {
+  createEngine,
+  MemoryStore,
+  MockLlm,
+  ReplayLlm,
   route,
-  canTransitionPhase,
-  canTransitionFlow,
-  nextChapter,
-  plannerForTier,
-  type State,
-  type Instruction,
-  type Progress,
   type StorePort,
   type LlmPort,
 } from "novel-engine";
-
-const instruction = route({
-  progress: {
-    phase: "writing",
-    flow: "writing",
-    totalChapters: 20,
-    completedChapters: [1, 2, 3],
-    pendingRewrites: [],
-    layered: false,
-  },
-  lastCompleted: 3,
-});
-// → { agent: "writer", task: "写第 4 章", reason: "续写下一章", chapter: 4 }
-```
-
-Future Engine sketch (not implemented):
-
-```ts
-class Engine {
-  constructor(
-    private readonly store: StorePort,
-    private readonly llm: LlmPort,
-  ) {}
-
-  async next(): Promise<Instruction | null> {
-    const state = await this.store.loadState(); // IO in the adapter
-    return route(state);                        // still pure
-  }
-}
 ```
 
 ## Tests
@@ -125,10 +111,20 @@ class Engine {
 Hand-authored JSON fixtures live in `fixtures/`:
 
 - `phase-transitions.json` / `flow-transitions.json` — validator golden tables
-- `route-cases.json` — Route golden cases (complete, foundation fill, rewrite, arc-end review, next chapter, steering, …)
+- `route-cases.json` — Route golden cases
+- `short-book.json` — 3-chapter mock book used by the Engine integration test
+
+The end-to-end mock run:
+
+```bash
+npm test -- tests/engine.short-book.test.ts
+```
+
+It starts from a prompt, injects `MemoryStore` + `MockLlm` (scripted tool calls, no provider), and asserts `phase === "complete"` with three committed chapters, checkpoints, and a stub `plan_start` decision.
 
 ```bash
 npm test
+npm run build
 ```
 
 ## License

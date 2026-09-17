@@ -1,7 +1,7 @@
 {
   "name": "novel-engine",
   "version": "0.0.1",
-  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Phase 0: domain + deterministic flow.route.",
+  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Phase 1: Engine + MemoryStore + MockLlm.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
