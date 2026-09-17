@@ -2,14 +2,20 @@ import type { Progress } from "../domain/progress.js";
 import type { State } from "../flow/state.js";
 
 /**
- * Persistence port. Phase 0 exports the contract only — no adapter, no Engine.
+ * Persistence port. Hosts inject an implementation (memory, OPFS, IndexedDB,
+ * or Node fs *outside* this library). All IO belongs in the adapter; `route` stays pure.
  *
- * Host apps will inject an implementation (memory, OPFS, IndexedDB, or Node fs
- * outside this library). All IO belongs in the adapter; `route` stays pure.
+ * Phase 1 adds a path-keyed artifact map so Engine / tools can persist Progress,
+ * foundation, drafts, checkpoints, and decisions without a filesystem.
  */
 export interface StorePort {
   /** Load every fact `route` needs. Adapters perform IO; Route never does. */
   loadState(): Promise<State>;
   loadProgress(): Promise<Progress | null>;
   saveProgress(progress: Progress): Promise<void>;
+  /** Read a stored artifact. Missing paths return `null`. */
+  read(path: string): Promise<Uint8Array | null>;
+  /** Write bytes or UTF-8 text to a logical path. */
+  write(path: string, data: Uint8Array | string): Promise<void>;
+  has(path: string): Promise<boolean>;
 }
