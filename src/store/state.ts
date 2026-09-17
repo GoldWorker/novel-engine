@@ -6,7 +6,12 @@ import type { StorePort } from "../ports/store.js";
 import type { RunMeta } from "./artifacts.js";
 import { foundationMissing } from "./foundation.js";
 import { readJson } from "./io.js";
-import { globalReviewPath, PATHS } from "./paths.js";
+import {
+  completedArcBoundaries,
+  checkArcBoundary,
+  loadLayeredOutline,
+} from "./layered.js";
+import { arcReviewPath, arcSummaryPath, globalReviewPath, PATHS, volumeSummaryPath } from "./paths.js";
 
 /**
  * Assemble the pure `route` snapshot from a path-keyed store.
@@ -32,6 +37,39 @@ export async function assembleState(store: StorePort): Promise<State> {
     progress,
     lastCompleted,
   };
+
+  if (progress.layered && lastCompleted > 0) {
+    const volumes = await loadLayeredOutline(store);
+    if (volumes) {
+      const completed = completedArcBoundaries(volumes, lastCompleted);
+      for (const boundary of completed) {
+        if (!(await store.has(arcReviewPath(boundary.endChapter)))) {
+          next.aggregateRefresh = refreshFrom("arc_review", boundary);
+          break;
+        }
+        if (!(await store.has(arcSummaryPath(boundary.volume, boundary.arc)))) {
+          next.aggregateRefresh = refreshFrom("arc_summary", boundary);
+          break;
+        }
+        if (boundary.isVolumeEnd && !(await store.has(volumeSummaryPath(boundary.volume)))) {
+          next.aggregateRefresh = refreshFrom("volume_summary", boundary);
+          break;
+        }
+      }
+
+      const boundary = checkArcBoundary(volumes, lastCompleted);
+      if (boundary) {
+        next.arcBoundary = boundary;
+        if (boundary.isArcEnd) {
+          next.hasArcReview = await store.has(arcReviewPath(lastCompleted));
+          next.hasArcSummary = await store.has(arcSummaryPath(boundary.volume, boundary.arc));
+          if (boundary.isVolumeEnd) {
+            next.hasVolumeSummary = await store.has(volumeSummaryPath(boundary.volume));
+          }
+        }
+      }
+    }
+  }
 
   if (!progress.layered && lastCompleted > 0) {
     let aggregateRefresh: AggregateRefresh | null = null;
@@ -64,4 +102,22 @@ export async function assembleState(store: StorePort): Promise<State> {
   }
 
   return next;
+}
+
+function refreshFrom(
+  kind: AggregateRefresh["kind"],
+  boundary: {
+    volume: number;
+    arc: number;
+    startChapter: number;
+    endChapter: number;
+  },
+): AggregateRefresh {
+  return {
+    kind,
+    volume: boundary.volume,
+    arc: boundary.arc,
+    startChapter: boundary.startChapter,
+    endChapter: boundary.endChapter,
+  };
 }

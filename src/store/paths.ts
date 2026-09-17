@@ -8,6 +8,7 @@ export const PATHS = {
   foundationAudit: "meta/foundation_audit.json",
   premise: "premise.md",
   outline: "outline.json",
+  layeredOutline: "layered_outline.json",
   characters: "characters.json",
   worldRules: "world_rules.json",
 } as const;
@@ -34,4 +35,20 @@ export function globalReviewPath(chapter: number): string {
 
 export function arcReviewPath(chapter: number): string {
   return `reviews/arc_${chapter}.json`;
+}
+
+export function chapterSummaryPath(chapter: number): string {
+  return `summaries/${padChapter(chapter)}.json`;
+}
+
+export function arcSummaryPath(volume: number, arc: number): string {
+  return `summaries/arc-v${padChapter(volume)}a${padChapter(arc)}.json`;
+}
+
+export function volumeSummaryPath(volume: number): string {
+  return `summaries/vol-v${padChapter(volume)}.json`;
+}
+
+export function characterSnapshotPath(volume: number, arc: number): string {
+  return `meta/snapshots/v${padChapter(volume)}a${padChapter(arc)}.json`;
 }

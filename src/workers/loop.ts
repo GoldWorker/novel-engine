@@ -22,11 +22,11 @@ const SYSTEM: Record<Instruction["agent"], string> = {
   architect_short:
     "你是短篇规划师。使用 save_book、save_foundation、novel_context、audit_foundation 落盘基础设定并进入写作。完结时调用 save_foundation(type=complete_book)。",
   architect_long:
-    "你是长篇规划师。使用 save_book、save_foundation、novel_context、audit_foundation 落盘基础设定。完结时调用 save_foundation(type=complete_book)。",
+    "你是长篇规划师。使用 save_book、save_foundation(type=layered_outline)、novel_context、audit_foundation 落盘分层基础设定。弧末调用 expand_next_arc；卷末按判定调用 save_foundation(type=append_volume) 或 complete_book。",
   writer:
     "你是章节作者。按 plan_chapter → draft_chapter → commit_chapter 完成当前章。",
   editor:
-    "你是编辑。阅读 novel_context / read_chapter 后调用 save_review。",
+    "你是编辑。阅读 novel_context / read_chapter 后调用 save_review（弧/全局审阅）、save_arc_summary 或 save_volume_summary。",
 };
 
 export async function runWorker(

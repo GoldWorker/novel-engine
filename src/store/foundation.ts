@@ -5,7 +5,7 @@ import { readJson, readText } from "./io.js";
 
 /**
  * Missing foundation artifacts in stable order, aligned with ainovel-cli
- * `Store.FoundationMissing` (short-book subset; no compass / layered outline).
+ * `Store.FoundationMissing` (compass omitted in this simplified SDK).
  */
 export async function foundationMissing(store: StorePort): Promise<string[]> {
   const missing: string[] = [];
@@ -58,13 +58,18 @@ export const FINGERPRINT_FILES = [
 
 /** Browser-safe FNV-1a over concatenated path + content pairs. */
 export async function foundationFingerprint(store: StorePort): Promise<string> {
+  const files: string[] = [...FINGERPRINT_FILES];
+  if (await store.has(PATHS.layeredOutline)) {
+    files.push(PATHS.layeredOutline);
+  }
+
   let hash = 2166136261;
   const mix = (byte: number): void => {
     hash ^= byte;
     hash = Math.imul(hash, 16777619);
   };
 
-  for (const rel of FINGERPRINT_FILES) {
+  for (const rel of files) {
     const data = await store.read(rel);
     if (data == null) {
       throw new Error(`fingerprint: missing ${rel}`);
