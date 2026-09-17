@@ -54,7 +54,11 @@ describe("engine host protocol", () => {
   it("rejects a second start while the engine is running", async () => {
     const { host, worker } = createLinkedMessagePorts();
     const store = new MemoryStore();
-    const llm = MockLlm.fromHandler(() => ({ text: "noop" }));
+    let release!: (value: { text: string }) => void;
+    const hang = new Promise<{ text: string }>((resolve) => {
+      release = resolve;
+    });
+    const llm = MockLlm.fromHandler(() => hang);
     const attached = attachEngineWorker(worker, {
       createPorts: () => ({ store, llm, maxSteps: 20 }),
     });
@@ -66,8 +70,7 @@ describe("engine host protocol", () => {
     const first = client.start({ prompt: book.prompt });
     await waitFor(() => kinds.includes("started") || kinds.includes("step"));
     await expect(client.start({ prompt: "again" })).rejects.toThrow(/already running/);
-    await client.pause();
-    await client.resume();
+    release({ text: "noop" });
     const result = await first;
     expect(result.stoppedReason).toBe("paused");
     client.close();
