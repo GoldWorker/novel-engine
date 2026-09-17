@@ -1,4 +1,4 @@
-# Host Session API (`novel-engine/session`) — S0 / S1 / S2 / S3
+# Host Session API (`novel-engine/session`) — S0–S4
 
 [English](session.md) | [中文文档](session.zh-CN.md)
 
@@ -8,7 +8,7 @@ Same-thread host façade for inspecting a book's foundation and switching betwee
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-Package version **0.3.0**. This document covers **S0 + S1 + S2 + S3**.
+Package version **0.3.0**. This document covers **S0–S4**.
 
 ## Status
 
@@ -18,9 +18,9 @@ Package version **0.3.0**. This document covers **S0 + S1 + S2 + S3**.
 | **S1** | `createNovelSession` read/inspect + `createNovelWorkspace` | Done |
 | **S2** | `generateFoundation` / upsert / auto-write (structured LLM) | Done |
 | **S3** | ChapterRunner / `chapter.get` / `saveFinal` / `write` | Done |
-| **S4** | Worker session bridge | Not yet |
+| **S4** | Worker session bridge (`createSessionClient` / `attachSessionWorker`) | Done |
 
-S1–S3 stay on a **same-thread** `NovelSession`. Do not look for a Worker-backed session here.
+S1–S3 stay on a **same-thread** `NovelSession` (source of truth). **S4** is an adapter over that same object via `postMessage` — not a second copy of the business rules.
 
 ## S0 — `foundationMissing`
 
@@ -71,7 +71,7 @@ await session.assertReadyToWrite();
 | `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`. Returns unsubscribe. |
 | `close()` | Further calls throw `SessionClosedError`. |
 
-**Not in S3:** Worker session bridge (S4).
+**Not in S4:** `NovelWorkspace` over Worker (keep workspace on the UI thread, one book session per worker).
 
 `readyToWrite` is `true` iff `foundationMissing` is empty (same audit / writing-phase rule as the Engine).
 
@@ -204,6 +204,54 @@ const written = await session.chapter.write({
 
 MockLlm: script `toolCalls` (unlike S2 `generateFoundation`, which uses JSON in `text`).
 
+## S4 — Worker bridge
+
+For a workbench UI: run `startAutoWrite` / `chapter.write` off the main thread, and keep vendor API keys out of the worker.
+
+Same-thread `NovelSession` remains the implementation. `attachSessionWorker` constructs one inside the worker; `createSessionClient` is a `NovelSession`-shaped RPC client (mirrors `createEngineClient`). **Do not import this from `novel-engine/worker`** — that entry stays Engine-only so default Engine workers do not pull session.
+
+```ts
+// session.worker.ts
+import { createOpfsStore } from "novel-engine/worker";
+import { attachSessionWorker, createNovelSession } from "novel-engine/session";
+
+attachSessionWorker(self, {
+  async createSession() {
+    const store = await createOpfsStore();
+    const llm = {
+      complete: (request) =>
+        fetch("/api/llm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(request),
+        }).then((res) => res.json()),
+    };
+    return createNovelSession({ store, llm, bookId: "letter" });
+  },
+});
+
+// main thread
+import { createSessionClient } from "novel-engine/session";
+
+const worker = new Worker(new URL("./session.worker.ts", import.meta.url), { type: "module" });
+const session = createSessionClient(worker, { bookId: "letter" });
+await session.inspectFoundation({ prompt: "写一本三章短篇" });
+await session.startAutoWrite({ prompt: "……", generateMissing: true });
+await session.chapter.write({ chapter: 1, mode: "create" });
+```
+
+| Piece | Notes |
+| --- | --- |
+| `attachSessionWorker(port, { createSession })` | Worker adapter. `createSession` injects `StorePort` + `LlmPort` and returns `createNovelSession(...)`. |
+| `createSessionClient(port, { bookId })` | Main-thread `NovelSession`. `bookId` must match the worker session. |
+| Protocol | `SESSION_PROTOCOL === 1`, `ns: "session"` (does not collide with Engine `v: 1` commands). Commands → `result` / `event` / `error`. |
+| Busy | Worker-side `SessionBusyError` — `startAutoWrite` in flight blocks `chapter.write` across the bridge. |
+| `generateFoundation` | **Runs in the worker** (not on the UI thread) because the book `StorePort` lives there (typically OPFS). A main-thread generate would write a different store. |
+| `LlmPort` | `fetch` a host BFF. **Do not embed vendor API keys** in a public worker bundle. No Next.js code ships in this package. |
+| Events | Worker forwards `subscribe` events (`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`). |
+
+Sketch: [`examples/session.worker.ts`](../examples/session.worker.ts) + [`examples/session-host.ts`](../examples/session-host.ts).
+
 ## Errors
 
 | Error | When |
@@ -211,7 +259,7 @@ MockLlm: script `toolCalls` (unlike S2 `generateFoundation`, which uses JSON in 
 | `FoundationIncompleteError` | `assertReadyToWrite` — `.gaps` is the inspect table. |
 | `SessionLlmRequiredError` | `generateFoundation` / Engine `startAutoWrite` / `chapter.write` without `llm`. |
 | `FoundationGenerateError` | Bad `keys`, or `complete().text` is not a JSON object. |
-| `SessionBusyError` | `startAutoWrite` or `chapter.write` while the other (or itself) is in flight. |
+| `SessionBusyError` | `startAutoWrite` or `chapter.write` while the other (or itself) is in flight (same-thread and over the Worker bridge). |
 | `ChapterConflictError` | Mode precondition failed (create on existing final, continue without draft, rewrite/polish without final). |
 | `ChapterRunnerError` | Invalid chapter number, empty `saveFinal`, or the writer loop produced no final. |
 | `SessionClosedError` | Method on a closed session (including after `switchTo`). |
@@ -220,6 +268,6 @@ MockLlm: script `toolCalls` (unlike S2 `generateFoundation`, which uses JSON in 
 
 ## Coming later
 
-- **S4** — Worker session bridge
+Workspace-over-Worker is not provided: keep `createNovelWorkspace` on the UI thread and open one session worker per book.
 
-Sketch: [`examples/session-workspace.ts`](../examples/session-workspace.ts).
+Sketches: [`examples/session-workspace.ts`](../examples/session-workspace.ts) (same-thread) · [`examples/session-host.ts`](../examples/session-host.ts) (Worker).

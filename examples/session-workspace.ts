@@ -2,12 +2,8 @@
  * Scenario 7 — same-thread host session (`novel-engine/session`).
  * 场景 7：同线程宿主 Session（`novel-engine/session`）。
  *
- * S0–S3: inspect foundation, upsert/generate (JSON in LlmPort.complete().text),
- * startAutoWrite, ChapterRunner (chapter.get / saveFinal / write), multi-book
- * workspace. No Worker bridge (S4).
- * S0–S3：检查基础设定、upsert/generate（JSON 在 complete().text）、
- * startAutoWrite、ChapterRunner（chapter.get / saveFinal / write）、多书工作区。
- * 不含 Worker 桥（S4）。
+ * S0–S3 same-thread. Worker bridge is scenario 8 (`session-host.ts`).
+ * S0–S3 同线程。Worker 桥见场景 8（`session-host.ts`）。
  */
 
 import { MemoryStore, MockLlm } from "novel-engine";

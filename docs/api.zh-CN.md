@@ -15,7 +15,7 @@
 | `.` | `dist/index.js` | Engine、`route`、领域类型、stores、mocks、主线程 client、书籍快照 |
 | `./worker` | `dist/worker.js` | `attachEngineWorker`，以及供专用 Worker 使用的 Engine / stores / snapshot |
 | `./llm` | `dist/llm.js` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope）。不会打进 `.` 或 `./worker`。 |
-| `./session` | `dist/session.js` | 可选同线程宿主 Session（S0–S3 检查、生成、自动写作、ChapterRunner、工作区）。不会打进 `.` / `./worker` / `./llm`。 |
+| `./session` | `dist/session.js` | 可选同线程宿主 Session（S0–S4 检查、生成、自动写作、ChapterRunner、Worker 桥、工作区）。不会打进 `.` / `./worker` / `./llm`。 |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
@@ -139,7 +139,7 @@ tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放�
 
 ## 可选宿主 Session（`novel-engine/session`）
 
-不属于 `.`、`./worker` 或 `./llm`。同线程检查、S2 生成/upsert/自动写作、S3 ChapterRunner，以及多书工作区。指南：[session.zh-CN.md](session.zh-CN.md)（[English](session.md)）。场景：[README §7](../README.zh-CN.md#scenario-session)。
+不属于 `.`、`./worker` 或 `./llm`。同线程检查、S2 生成/upsert/自动写作、S3 ChapterRunner、S4 Worker 桥，以及多书工作区。指南：[session.zh-CN.md](session.zh-CN.md)（[English](session.md)）。场景：[README §7](../README.zh-CN.md#scenario-session) · [README §8](../README.zh-CN.md#scenario-session-worker)。
 
 | 导出 | 种类 | 说明 |
 | --- | --- | --- |
@@ -147,21 +147,22 @@ tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放�
 | `NovelSession` | type | 检查 + `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter` / `subscribe` / 快照封装 / `close`。 |
 | `createNovelWorkspace({ createStore, llm?, indexStore? })` | fn | 每个 `bookId` 一个 store。可选 `indexStore` 持久化 `_index.json`。 |
 | `NovelWorkspace` | type | `createBook` / `open` / `switchTo` / `listBooks` / `close` / `currentBookId`。 |
+| `createSessionClient(port, { bookId })` | fn | S4 主线程 `NovelSession`（消息 RPC）。 |
+| `attachSessionWorker(port, { createSession })` | fn | S4 Worker 适配器；`createSession` 返回同线程 `NovelSession`。 |
+| `SESSION_PROTOCOL` / `SESSION_NS` / `isSessionCommand` / `isSessionNotice` | const / fn | Session 协议（`v: 1`，`ns: "session"`）。 |
 | `FoundationMeta` / `FoundationGap` / `InspectResult` / `PlanningInfo` | types | 检查载荷。缺口含中英短提示。 |
 | `FoundationPatch` / `FoundationKey` / `FOUNDATION_KEYS` / `GenerateFoundationOptions` / `StartAutoWriteOptions` / `AutoWriteResult` / `SessionEvent` | types | S2 生成 / 自动写作。 |
 | `ChapterRunner` / `ChapterView` / `ChapterWriteInput` / `ChapterWriteResult` / `ChapterWriteMode` / `CHAPTER_WRITE_MODES` | type / const | S3 ChapterRunner。模式：`create` / `continue` / `rewrite` / `polish`。 |
 | `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`。 |
 | `SessionLlmRequiredError` / `FoundationGenerateError` | class | 缺少 `llm`；非法 generate JSON / keys。 |
-| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` 已在进行中。 |
+| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` 已在进行中（含跨 Worker 桥）。 |
 | `ChapterConflictError` / `ChapterRunnerError` | class | 章节模式前置失败；作者循环 / `saveFinal` 失败。 |
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | 已关闭的 session/工作区；未知 `bookId`。 |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`。 |
 
-**不在 S3：** Worker session 桥（S4）。
+`generateFoundation` 要求 `LlmPort.complete` 在 **`text` 里返回 JSON**（不新增 tools）。走 Worker 桥时它在 **Worker 里**跑（书的 store 在那边）。默认 `fill_missing` 只 upsert 仍缺的键。`chapter.write` 是专用作者循环（MockLlm 用 `toolCalls`）；不跑 `Engine.run`，也不驱动 `pendingRewrites`。Worker 里的 `LlmPort` 应 `fetch` 宿主 BFF——**不要内嵌供应商密钥**。
 
-`generateFoundation` 要求 `LlmPort.complete` 在 **`text` 里返回 JSON**（不新增 tools）。默认 `fill_missing` 只 upsert 仍缺的键。`chapter.write` 是专用作者循环（MockLlm 用 `toolCalls`）；不跑 `Engine.run`，也不驱动 `pendingRewrites`。
-
-示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)。
+示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)（同线程）· [`examples/session-host.ts`](../examples/session-host.ts)（Worker）。
 
 ## Worker 宿主
 

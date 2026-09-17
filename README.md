@@ -12,12 +12,12 @@ Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/
 
 Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)). Session: [docs/session.md](docs/session.md).
 
-**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm) · [host session](#scenario-session). Runnable sources stay in [`examples/`](examples/).
+**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm) · [host session](#scenario-session) · [session over Worker](#scenario-session-worker). Runnable sources stay in [`examples/`](examples/).
 
 ## What's not included
 
 - Vendor LLM clients in the default `novel-engine` / `novel-engine/worker` bundles — inject `LlmPort`, or import optional [`novel-engine/llm`](docs/llm-adapters.md) (fetch adapters; **do not put API keys in a public browser app**)
-- Host session in the default bundles — import optional [`novel-engine/session`](docs/session.md) (S0–S3 inspect, generate, auto-write, ChapterRunner, workspace; S4 Worker session is not included yet)
+- Host session in the default bundles — import optional [`novel-engine/session`](docs/session.md) (S0–S4 inspect, generate, auto-write, ChapterRunner, Worker bridge, workspace)
 - React package, Demo SPA, or any visual app
 - Arbiter full semantic scenes (`plan_start` is a keyword stub)
 - ChapterAdvanceGate review-mode UI
@@ -57,7 +57,7 @@ Package exports:
 | `.` | `novel-engine` | Engine, stores, client, mocks, snapshot, `route` |
 | `./worker` | `novel-engine/worker` | `attachEngineWorker` + Engine/stores for a dedicated worker |
 | `./llm` | `novel-engine/llm` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope) |
-| `./session` | `novel-engine/session` | Optional same-thread host session (inspect + ChapterRunner + workspace) |
+| `./session` | `novel-engine/session` | Optional same-thread host session + Worker session bridge |
 
 Published `files`: `dist/`, `README.md`, `LICENSE`.
 
@@ -75,7 +75,8 @@ Scenarios compose: the Worker example already calls `createOpfsStore()`; snapsho
 | [4. Embed in a Web Worker](#scenario-worker) | Dedicated worker + main-thread client: `start` / `steer` / `pause` / `resume` / `snapshot`. | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. Book snapshot export / import](#scenario-snapshot) | Zip every store path (fflate) and merge-restore into another `StorePort`. | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. Inject a real LLM](#scenario-llm) | Host-side OpenAI / Anthropic / DashScope `LlmPort` via optional `novel-engine/llm`. Keys belong on a BFF. | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
-| [7. Host session (inspect + generate + ChapterRunner + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace`: foundation gaps, structured JSON generate, optional Engine auto-write, single-chapter ChapterRunner. No Worker session (S4). | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
+| [7. Host session (inspect + generate + ChapterRunner + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace`: foundation gaps, structured JSON generate, optional Engine auto-write, single-chapter ChapterRunner. | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
+| [8. Session over Worker](#scenario-session-worker) | Workbench: `startAutoWrite` / `chapter.write` off the UI thread. `createSessionClient` + `attachSessionWorker`. `LlmPort` fetches a BFF — no vendor keys in the worker. | [`session.worker.ts`](examples/session.worker.ts) + [`session-host.ts`](examples/session-host.ts) |
 
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
 
@@ -335,7 +336,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 **When:** A same-thread host wants to inspect whether a store is ready to write, fill foundation via a structured LLM JSON call, write or rewrite a single chapter, or switch among several books.
 
-Optional subpath. S0–S3: `getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. `generateFoundation` is **one-shot JSON in `LlmPort.complete().text`**, not an Engine loop. `chapter.write` is a **dedicated writer loop** (reuses writer tools; not `Engine.run` / not `pendingRewrites`). **Not yet:** Worker session (S4).
+Optional subpath. S0–S3: `getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. `generateFoundation` is **one-shot JSON in `LlmPort.complete().text`**, not an Engine loop. `chapter.write` is a **dedicated writer loop** (reuses writer tools; not `Engine.run` / not `pendingRewrites`). Worker off-thread: [scenario 8](#scenario-session-worker).
 
 Details: [docs/session.md](docs/session.md) ([中文](docs/session.zh-CN.md)). Sketch: [`examples/session-workspace.ts`](examples/session-workspace.ts).
 
@@ -368,6 +369,26 @@ const ws = createNovelWorkspace({
 });
 await ws.createBook({ bookId: "a", title: "无主的信" });
 await ws.switchTo("a");
+```
+
+<a id="scenario-session-worker"></a>
+
+### 8. Session over Worker (`createSessionClient`)
+
+**When:** A workbench UI must not block on auto-write / chapter ops, and vendor API keys must stay on a BFF.
+
+Import `attachSessionWorker` from `novel-engine/session` (not `novel-engine/worker`). The worker holds the same-thread `NovelSession` + OPFS store; the main thread uses `createSessionClient`. `LlmPort.complete` should `fetch("/api/llm")` — **do not put API keys in the worker bundle**. `generateFoundation` runs in the worker because that is where the store lives.
+
+Details: [docs/session.md](docs/session.md#s4--worker-bridge). Pair: [`examples/session.worker.ts`](examples/session.worker.ts) + [`examples/session-host.ts`](examples/session-host.ts).
+
+```ts
+import { createSessionClient } from "novel-engine/session";
+
+const worker = new Worker(new URL("./session.worker.ts", import.meta.url), { type: "module" });
+const session = createSessionClient(worker, { bookId: "letter" });
+await session.inspectFoundation({ prompt: "写一本三章短篇" });
+await session.startAutoWrite({ prompt: "……", generateMissing: true });
+await session.chapter.write({ chapter: 1, mode: "create" });
 ```
 
 ## How `route` decides

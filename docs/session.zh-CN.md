@@ -1,4 +1,4 @@
-# 宿主 Session API（`novel-engine/session`）— S0 / S1 / S2 / S3
+# 宿主 Session API（`novel-engine/session`）— S0–S4
 
 [English](session.md) | [中文文档](session.zh-CN.md)
 
@@ -8,7 +8,7 @@
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-包版本 **0.3.0**。本文覆盖 **S0 + S1 + S2 + S3**。
+包版本 **0.3.0**。本文覆盖 **S0–S4**。
 
 ## 状态
 
@@ -18,9 +18,9 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 | **S1** | `createNovelSession` 只读/检查 + `createNovelWorkspace` | 已完成 |
 | **S2** | `generateFoundation` / upsert / 自动写作（结构化 LLM） | 已完成 |
 | **S3** | ChapterRunner / `chapter.get` / `saveFinal` / `write` | 已完成 |
-| **S4** | Worker session 桥 | 尚未 |
+| **S4** | Worker session 桥（`createSessionClient` / `attachSessionWorker`） | 已完成 |
 
-S1–S3 使用**同线程** `NovelSession`。这里没有 Worker 版 session。
+S1–S3 使用**同线程** `NovelSession`（业务真相源）。**S4** 是通过 `postMessage` 适配同一对象，不是第二套业务实现。
 
 ## S0 — `foundationMissing`
 
@@ -71,7 +71,7 @@ S1 里 `llm` 对只读检查可选。**S2** 的 `generateFoundation` / `startAut
 | `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`。返回取消订阅函数。 |
 | `close()` | 之后的调用抛 `SessionClosedError`。 |
 
-**不在 S3：** Worker session 桥（S4）。
+**不在 S4：** Worker 上的 `NovelWorkspace`（工作区留在 UI 线程；每个 Worker 一份书 session）。
 
 `readyToWrite === true` 当且仅当 `foundationMissing` 为空（与 Engine 的审查 / writing 阶段规则一致）。
 
@@ -204,6 +204,54 @@ const written = await session.chapter.write({
 
 MockLlm：脚本 `toolCalls`（与 S2 `generateFoundation` 用 `text` 里的 JSON 不同）。
 
+## S4 — Worker 桥
+
+给工作台 UI：把 `startAutoWrite` / `chapter.write` 移出主线程，并且不要把供应商 API Key 放进 Worker。
+
+同线程 `NovelSession` 仍是实现。`attachSessionWorker` 在 Worker 里构造一份；`createSessionClient` 是形状与 `NovelSession` 相同的 RPC 客户端（对标 `createEngineClient`）。**不要从 `novel-engine/worker` 导入这些符号**——那个入口只给 Engine，避免默认 Engine Worker 打进 session。
+
+```ts
+// session.worker.ts
+import { createOpfsStore } from "novel-engine/worker";
+import { attachSessionWorker, createNovelSession } from "novel-engine/session";
+
+attachSessionWorker(self, {
+  async createSession() {
+    const store = await createOpfsStore();
+    const llm = {
+      complete: (request) =>
+        fetch("/api/llm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(request),
+        }).then((res) => res.json()),
+    };
+    return createNovelSession({ store, llm, bookId: "letter" });
+  },
+});
+
+// 主线程
+import { createSessionClient } from "novel-engine/session";
+
+const worker = new Worker(new URL("./session.worker.ts", import.meta.url), { type: "module" });
+const session = createSessionClient(worker, { bookId: "letter" });
+await session.inspectFoundation({ prompt: "写一本三章短篇" });
+await session.startAutoWrite({ prompt: "……", generateMissing: true });
+await session.chapter.write({ chapter: 1, mode: "create" });
+```
+
+| 部件 | 说明 |
+| --- | --- |
+| `attachSessionWorker(port, { createSession })` | Worker 适配器。`createSession` 注入 `StorePort` + `LlmPort`，返回 `createNovelSession(...)`。 |
+| `createSessionClient(port, { bookId })` | 主线程 `NovelSession`。`bookId` 必须与 Worker 侧 session 一致。 |
+| 协议 | `SESSION_PROTOCOL === 1`，`ns: "session"`（不与 Engine 的 `v: 1` 命令冲突）。命令 → `result` / `event` / `error`。 |
+| Busy | Worker 侧 `SessionBusyError`：`startAutoWrite` 进行中会挡住跨桥的 `chapter.write`。 |
+| `generateFoundation` | **在 Worker 里跑**（不在 UI 线程），因为书的 `StorePort` 在那边（通常是 OPFS）。主线程 generate 会写到另一份 store。 |
+| `LlmPort` | `fetch` 宿主 BFF。**不要把供应商 API Key 打进公开 Worker 包**。本包不含 Next.js 代码。 |
+| 事件 | Worker 转发 `subscribe` 事件（`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`）。 |
+
+示意：[`examples/session.worker.ts`](../examples/session.worker.ts) + [`examples/session-host.ts`](../examples/session-host.ts)。
+
 ## 错误
 
 | 错误 | 何时 |
@@ -211,7 +259,7 @@ MockLlm：脚本 `toolCalls`（与 S2 `generateFoundation` 用 `text` 里的 JSO
 | `FoundationIncompleteError` | `assertReadyToWrite` — `.gaps` 即检查表。 |
 | `SessionLlmRequiredError` | `generateFoundation` / Engine 版 `startAutoWrite` / `chapter.write` 未提供 `llm`。 |
 | `FoundationGenerateError` | 非法 `keys`，或 `complete().text` 不是 JSON 对象。 |
-| `SessionBusyError` | `startAutoWrite` 或 `chapter.write` 进行中再调用另一个（或自己）。 |
+| `SessionBusyError` | `startAutoWrite` 或 `chapter.write` 进行中再调用另一个（或自己）（同线程与 Worker 桥均如此）。 |
 | `ChapterConflictError` | 模式前置失败（create 时已有终稿、continue 没有草稿、rewrite/polish 没有终稿）。 |
 | `ChapterRunnerError` | 非法章节号、空的 `saveFinal`、或作者循环没有产出终稿。 |
 | `SessionClosedError` | 对已关闭 session 调用（包括 `switchTo` 之后）。 |
@@ -220,6 +268,6 @@ MockLlm：脚本 `toolCalls`（与 S2 `generateFoundation` 用 `text` 里的 JSO
 
 ## 后续
 
-- **S4** — Worker session 桥
+不提供 Workspace-over-Worker：`createNovelWorkspace` 留在 UI 线程，每本书开一个 session Worker。
 
-示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)。
+示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)（同线程）· [`examples/session-host.ts`](../examples/session-host.ts)（Worker）。
