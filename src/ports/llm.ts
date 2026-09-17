@@ -39,8 +39,9 @@ export interface LlmCompletionResult {
 /**
  * LLM completion port.
  *
- * Hosts inject a browser-safe or Node adapter. This library never ships a real
- * provider client — tests use `MockLlm` / `ReplayLlm`.
+ * Hosts inject a browser-safe or Node adapter. Default entries never ship a
+ * provider client (`MockLlm` / `ReplayLlm` only). Optional fetch adapters live
+ * behind `novel-engine/llm`.
  */
 export interface LlmPort {
   complete(request: LlmCompletionRequest): Promise<LlmCompletionResult>;

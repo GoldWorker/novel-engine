@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     worker: "src/worker.ts",
+    llm: "src/adapters/llm/index.ts",
   },
   format: ["esm"],
   dts: true,

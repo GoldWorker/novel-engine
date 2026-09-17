@@ -1,7 +1,7 @@
 {
   "name": "novel-engine",
-  "version": "0.1.0",
-  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Engine, route, MemoryStore, OpfsStore, Worker host, and book snapshot zip.",
+  "version": "0.2.0",
+  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Engine, route, MemoryStore, OpfsStore, Worker host, book snapshot zip, and optional fetch LLM adapters.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -18,6 +18,11 @@
       "types": "./dist/worker.d.ts",
       "import": "./dist/worker.js",
       "default": "./dist/worker.js"
+    },
+    "./llm": {
+      "types": "./dist/llm.d.ts",
+      "import": "./dist/llm.js",
+      "default": "./dist/llm.js"
     }
   },
   "files": [
