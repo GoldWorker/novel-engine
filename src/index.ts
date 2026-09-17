@@ -38,6 +38,26 @@ export type {
   LlmPort,
   LlmRole,
   LlmMessage,
+  LlmToolSpec,
+  LlmToolCall,
   LlmCompletionRequest,
   LlmCompletionResult,
 } from "./ports/index.js";
+
+export { MemoryStore, PATHS, readJson, writeJson, readText, writeText, readJsonl } from "./store/index.js";
+export type {
+  BookMetadata,
+  OutlineEntry,
+  Character,
+  WorldRule,
+  ChapterPlan,
+  Checkpoint,
+  DecisionRecord,
+  RunMeta,
+} from "./store/index.js";
+
+export { MockLlm, ReplayLlm } from "./llm/index.js";
+export type { MockLlmHandler, MockLlmStep } from "./llm/index.js";
+
+export { createEngine, Engine, EngineError } from "./engine/index.js";
+export type { EngineDeps, EngineResult, EngineStopReason } from "./engine/index.js";
