@@ -1,7 +1,7 @@
 {
   "name": "novel-engine",
   "version": "0.0.1",
-  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Phase 1: Engine + MemoryStore + MockLlm.",
+  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Phase 2: Engine + MemoryStore + OpfsStore + Worker host.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -12,6 +12,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
     }
   },
   "files": [

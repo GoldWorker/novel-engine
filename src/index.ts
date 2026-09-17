@@ -44,7 +44,19 @@ export type {
   LlmCompletionResult,
 } from "./ports/index.js";
 
-export { MemoryStore, PATHS, readJson, writeJson, readText, writeText, readJsonl } from "./store/index.js";
+export {
+  MemoryStore,
+  OpfsStore,
+  createOpfsStore,
+  isOpfsAvailable,
+  OpfsUnavailableError,
+  PATHS,
+  readJson,
+  writeJson,
+  readText,
+  writeText,
+  readJsonl,
+} from "./store/index.js";
 export type {
   BookMetadata,
   OutlineEntry,
@@ -54,10 +66,46 @@ export type {
   Checkpoint,
   DecisionRecord,
   RunMeta,
+  PendingSteer,
+  OpfsStoreOptions,
+  CreateOpfsStoreOptions,
+  OpfsDirectoryHandle,
+  OpfsFileHandle,
+  OpfsStorageManager,
 } from "./store/index.js";
 
 export { MockLlm, ReplayLlm } from "./llm/index.js";
 export type { MockLlmHandler, MockLlmStep } from "./llm/index.js";
 
 export { createEngine, Engine, EngineError } from "./engine/index.js";
-export type { EngineDeps, EngineResult, EngineStopReason } from "./engine/index.js";
+export type {
+  EngineDeps,
+  EngineResult,
+  EngineStopReason,
+  EngineLoopEvent,
+} from "./engine/index.js";
+
+export { createEngineClient } from "./host/client.js";
+export type { EngineClient, MessagePortLike, MessageListener } from "./host/client.js";
+export {
+  ENGINE_PROTOCOL,
+  isEngineCommand,
+  isEngineNotice,
+  loopEventToHost,
+} from "./host/protocol.js";
+export type {
+  EngineCommand,
+  EngineCommandType,
+  EngineNotice,
+  EngineNoticeType,
+  EngineHostEvent,
+  EngineSnapshot,
+  EngineStartCommand,
+  EngineSteerCommand,
+  EnginePauseCommand,
+  EngineResumeCommand,
+  EngineSnapshotCommand,
+  EngineEventNotice,
+  EngineSnapshotNotice,
+  EngineErrorNotice,
+} from "./host/protocol.js";

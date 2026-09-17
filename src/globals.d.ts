@@ -6,3 +6,6 @@ declare class TextEncoder {
 declare class TextDecoder {
   decode(input?: Uint8Array): string;
 }
+
+declare function queueMicrotask(callback: () => void): void;
+declare function setTimeout(handler: () => void, timeout?: number): unknown;

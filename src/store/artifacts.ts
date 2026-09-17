@@ -1,4 +1,4 @@
-import type { AgentId, PlanningTier } from "../domain/index.js";
+import type { AgentId, Flow, PlanningTier } from "../domain/index.js";
 
 export interface BookMetadata {
   title: string;
@@ -70,8 +70,15 @@ export interface PlanStartRecord {
   decisionId: string;
 }
 
+export interface PendingSteer {
+  note: string;
+  previousFlow: Flow;
+}
+
 export interface RunMeta {
   startPrompt?: string;
   planningTier?: PlanningTier | "";
   planStart?: PlanStartRecord;
+  /** Host steer in flight; cleared when the engine resumes. */
+  pendingSteer?: PendingSteer;
 }

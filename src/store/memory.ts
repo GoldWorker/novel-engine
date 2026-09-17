@@ -2,16 +2,9 @@ import type { Progress } from "../domain/progress.js";
 import type { State } from "../flow/state.js";
 import type { StorePort } from "../ports/store.js";
 import { decodeUtf8, encodeUtf8, readJson, writeJson } from "./io.js";
+import { normalizeStorePath } from "./normalize.js";
 import { PATHS } from "./paths.js";
 import { assembleState } from "./state.js";
-
-function normalizePath(path: string): string {
-  const trimmed = path.replace(/\\/g, "/").replace(/^\/+/u, "");
-  if (trimmed === "" || trimmed.split("/").includes("..")) {
-    throw new Error(`invalid store path: ${path}`);
-  }
-  return trimmed;
-}
 
 /**
  * In-memory `StorePort`: a map of logical paths → UTF-8 bytes / JSON.
@@ -26,7 +19,7 @@ export class MemoryStore implements StorePort {
     }
     for (const [path, value] of Object.entries(initial)) {
       this.files.set(
-        normalizePath(path),
+        normalizeStorePath(path),
         typeof value === "string" ? encodeUtf8(value) : value.slice(),
       );
     }
@@ -45,17 +38,17 @@ export class MemoryStore implements StorePort {
   }
 
   async read(path: string): Promise<Uint8Array | null> {
-    const data = this.files.get(normalizePath(path));
+    const data = this.files.get(normalizeStorePath(path));
     return data ? data.slice() : null;
   }
 
   async write(path: string, data: Uint8Array | string): Promise<void> {
     const bytes = typeof data === "string" ? encodeUtf8(data) : data.slice();
-    this.files.set(normalizePath(path), bytes);
+    this.files.set(normalizeStorePath(path), bytes);
   }
 
   async has(path: string): Promise<boolean> {
-    return this.files.has(normalizePath(path));
+    return this.files.has(normalizeStorePath(path));
   }
 
   /** Sorted logical paths, optionally filtered by prefix. */
