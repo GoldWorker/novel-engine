@@ -1,4 +1,4 @@
-# Host Session API (`novel-engine/session`) — S0 / S1 / S2
+# Host Session API (`novel-engine/session`) — S0 / S1 / S2 / S3
 
 [English](session.md) | [中文文档](session.zh-CN.md)
 
@@ -8,7 +8,7 @@ Same-thread host façade for inspecting a book's foundation and switching betwee
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-Package version **0.3.0**. This document covers **S0 + S1 + S2**.
+Package version **0.3.0**. This document covers **S0 + S1 + S2 + S3**.
 
 ## Status
 
@@ -17,7 +17,7 @@ Package version **0.3.0**. This document covers **S0 + S1 + S2**.
 | **S0** | Types, gap table, `foundationMissing` layered-outline fix | Done |
 | **S1** | `createNovelSession` read/inspect + `createNovelWorkspace` | Done |
 | **S2** | `generateFoundation` / upsert / auto-write (structured LLM) | Done |
-| **S3** | ChapterRunner / chapter write APIs | Not yet |
+| **S3** | ChapterRunner / `chapter.get` / `saveFinal` / `write` | Done |
 | **S4** | Worker session bridge | Not yet |
 
 S1–S3 stay on a **same-thread** `NovelSession`. Do not look for a Worker-backed session here.
@@ -53,7 +53,7 @@ await session.inspectFoundation({ prompt: "写一本分层中篇：……" });
 await session.assertReadyToWrite();
 ```
 
-`llm` is optional for inspect-only. **S2** `generateFoundation` / `startAutoWrite` require it (`SessionLlmRequiredError` if missing). Every read is **store read-through** (no Session cache of artifacts).
+`llm` is optional for inspect-only. **S2** `generateFoundation` / `startAutoWrite` and **S3** `chapter.write` require it (`SessionLlmRequiredError` if missing). Every read is **store read-through** (no Session cache of artifacts).
 
 | Method | Notes |
 | --- | --- |
@@ -66,11 +66,12 @@ await session.assertReadyToWrite();
 | `exportSnapshot()` / `importSnapshot(bytes)` | Thin wrappers around the existing book-snapshot APIs. |
 | `upsertFoundation(patch)` | Partial write of `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules`. Invalidates `meta/foundation_audit.json` when fingerprint files change. |
 | `generateFoundation({ prompt, keys, mode? })` | Structured one-shot `LlmPort.complete`; parse JSON from `text`; `upsertFoundation`. **Not** an Engine loop. |
-| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | Optional upsert/generate, then either `{ status: "needs_foundation" }` or `createEngine(...).run`. |
-| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `stopped`. Returns unsubscribe. |
+| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | Optional upsert/generate, then either `{ status: "needs_foundation" }` or `createEngine(...).run`. Mutually exclusive with `chapter.write` (`SessionBusyError`). |
+| `chapter` | S3 ChapterRunner: `get` / `saveFinal` / `write`. Same-thread; not an Engine book Route. |
+| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`. Returns unsubscribe. |
 | `close()` | Further calls throw `SessionClosedError`. |
 
-**Not in S2:** ChapterRunner / `chapter.*` (S3), Worker session bridge (S4).
+**Not in S3:** Worker session bridge (S4).
 
 `readyToWrite` is `true` iff `foundationMissing` is empty (same audit / writing-phase rule as the Engine).
 
@@ -131,7 +132,9 @@ const outcome = await session.startAutoWrite({
 4. If `requireConfirmGaps !== false` (default **true**) and `gaps.length > 0` → `{ status: "needs_foundation", gaps, meta }` **without** `Engine.run`
 5. If ready (or confirm disabled) → `createEngine({ store, llm }).run({ prompt, maxSteps })` → `{ status: "completed" | "stopped", result, meta }` (`completed` when `stoppedReason === "complete"`)
 
-`subscribe` emits `foundation_updated` after upsert, `auto_write_step` for each Engine `step`, and `stopped` for both needs-foundation and Engine outcomes.
+`subscribe` emits `foundation_updated` after upsert, `auto_write_step` for each Engine `step`, `chapter_step` during `chapter.write`, and `stopped` for both needs-foundation and Engine outcomes.
+
+`startAutoWrite` and `chapter.write` share a session busy flag: a second call while one is in flight throws `SessionBusyError`.
 
 ## S1 — `NovelWorkspace`
 
@@ -167,20 +170,56 @@ await ws.close();
 
 The workspace **caches** the first store returned for each `bookId`. Memory tests should still use one `MemoryStore` per book (Map or factory cache). Path-prefix-in-one-store is not the supported convention.
 
+## S3 — ChapterRunner
+
+Single-chapter create / continue / rewrite / polish on the **same-thread** session. Reuses writer tools (`plan_chapter` / `draft_chapter` / `commit_chapter` / `novel_context` / `read_chapter`) from `src/workers/tools.ts`. It does **not** run `Engine.run`, does **not** drive `pendingRewrites`, and is **not** a full-book Route.
+
+```ts
+const view = await session.chapter.get(1);
+await session.chapter.saveFinal(1, "# 风暴之后\n\n……");
+const written = await session.chapter.write({
+  chapter: 1,
+  mode: "create", // or continue | rewrite | polish
+  title: "风暴之后",
+  instruction: "灯塔视角",
+});
+```
+
+| Method | Notes |
+| --- | --- |
+| `chapter.get(n)` | `{ chapter, plan, draft, final, summary }` from `drafts/NN.*`, `chapters/NN.md`, `summaries/NN.json`. `null` when none exist. |
+| `chapter.saveFinal(n, markdown)` | Writes `chapters/NN.md`, updates `progress.completedChapters` / checkpoint. No LLM. |
+| `chapter.write({ chapter, mode, instruction?, title?, force? })` | Dedicated writer loop over `LlmPort` + existing writer tools. Requires `llm`. |
+
+### Modes
+
+| Mode | Precondition | Behavior |
+| --- | --- | --- |
+| `create` | No final (unless `force: true`) | `plan_chapter` → `draft_chapter(write)` → `commit_chapter`. Existing final → `ChapterConflictError`. |
+| `continue` | Draft present, no final | Resume via `draft_chapter(append)` then commit. |
+| `rewrite` | Final present | New plan/draft/commit with `instruction`. Overwrites the completed chapter (session override; **not** `pendingRewrites`). |
+| `polish` | Final present | Lighter rewrite of the existing final (same tool path, polish-oriented prompt). |
+
+`chapter.write` injects an internal `sessionOverride` only on `plan_chapter` / `commit_chapter` so a completed chapter can be overwritten. Engine sequential saga is unchanged when that flag is absent.
+
+MockLlm: script `toolCalls` (unlike S2 `generateFoundation`, which uses JSON in `text`).
+
 ## Errors
 
 | Error | When |
 | --- | --- |
 | `FoundationIncompleteError` | `assertReadyToWrite` — `.gaps` is the inspect table. |
-| `SessionLlmRequiredError` | `generateFoundation` / Engine `startAutoWrite` without `llm`. |
+| `SessionLlmRequiredError` | `generateFoundation` / Engine `startAutoWrite` / `chapter.write` without `llm`. |
 | `FoundationGenerateError` | Bad `keys`, or `complete().text` is not a JSON object. |
+| `SessionBusyError` | `startAutoWrite` or `chapter.write` while the other (or itself) is in flight. |
+| `ChapterConflictError` | Mode precondition failed (create on existing final, continue without draft, rewrite/polish without final). |
+| `ChapterRunnerError` | Invalid chapter number, empty `saveFinal`, or the writer loop produced no final. |
 | `SessionClosedError` | Method on a closed session (including after `switchTo`). |
 | `WorkspaceClosedError` | Workspace method after `close()`. |
 | `BookNotFoundError` | `open` / `switchTo` unknown `bookId`. |
 
 ## Coming later
 
-- **S3** — ChapterRunner
 - **S4** — Worker session bridge
 
 Sketch: [`examples/session-workspace.ts`](../examples/session-workspace.ts).

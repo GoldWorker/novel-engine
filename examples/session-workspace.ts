@@ -2,10 +2,12 @@
  * Scenario 7 — same-thread host session (`novel-engine/session`).
  * 场景 7：同线程宿主 Session（`novel-engine/session`）。
  *
- * S0–S2: inspect foundation, upsert/generate (JSON in LlmPort.complete().text),
- * startAutoWrite, multi-book workspace. No ChapterRunner or Worker bridge (S3–S4).
- * S0–S2：检查基础设定、upsert/generate（JSON 在 complete().text）、
- * startAutoWrite、多书工作区。不含 ChapterRunner / Worker 桥（S3–S4）。
+ * S0–S3: inspect foundation, upsert/generate (JSON in LlmPort.complete().text),
+ * startAutoWrite, ChapterRunner (chapter.get / saveFinal / write), multi-book
+ * workspace. No Worker bridge (S4).
+ * S0–S3：检查基础设定、upsert/generate（JSON 在 complete().text）、
+ * startAutoWrite、ChapterRunner（chapter.get / saveFinal / write）、多书工作区。
+ * 不含 Worker 桥（S4）。
  */
 
 import { MemoryStore, MockLlm } from "novel-engine";
@@ -50,6 +52,41 @@ export async function generateWithMockJson() {
     prompt: "写一本三章短篇",
     requireConfirmGaps: true,
   });
+}
+
+/** MockLlm: chapter.write uses writer toolCalls, not Engine.run. */
+export async function writeChapterWithMockTools() {
+  const llm = new MockLlm([
+    {
+      text: "write",
+      toolCalls: [
+        {
+          id: "plan-1",
+          name: "plan_chapter",
+          arguments: {
+            chapter: 1,
+            title: "风暴之后",
+            goal: "捡到信",
+            conflict: "潮",
+            hook: "灯",
+          },
+        },
+        {
+          id: "draft-1",
+          name: "draft_chapter",
+          arguments: { chapter: 1, content: "林守捡到一封信。", mode: "write" },
+        },
+        { id: "commit-1", name: "commit_chapter", arguments: { chapter: 1 } },
+      ],
+    },
+    { text: "done" },
+  ]);
+  const session = await createNovelSession({
+    store: new MemoryStore(),
+    llm,
+    bookId: "letter",
+  });
+  return session.chapter.write({ chapter: 1, mode: "create", title: "风暴之后" });
 }
 
 export async function twoBookWorkspace() {

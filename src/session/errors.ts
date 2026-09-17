@@ -37,7 +37,7 @@ export class BookNotFoundError extends Error {
 
 export class SessionLlmRequiredError extends Error {
   constructor(
-    message = "createNovelSession requires an llm for generateFoundation / startAutoWrite",
+    message = "createNovelSession requires an llm for generateFoundation / startAutoWrite / chapter.write",
   ) {
     super(message);
     this.name = "SessionLlmRequiredError";
@@ -48,5 +48,29 @@ export class FoundationGenerateError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "FoundationGenerateError";
+  }
+}
+
+export class SessionBusyError extends Error {
+  constructor(message = "session is busy") {
+    super(message);
+    this.name = "SessionBusyError";
+  }
+}
+
+export class ChapterConflictError extends Error {
+  readonly chapter: number;
+
+  constructor(chapter: number, message: string) {
+    super(message);
+    this.name = "ChapterConflictError";
+    this.chapter = chapter;
+  }
+}
+
+export class ChapterRunnerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChapterRunnerError";
   }
 }

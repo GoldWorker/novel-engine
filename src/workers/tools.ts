@@ -407,8 +407,11 @@ function planChapterTool(store: StorePort): Tool {
       if (plan.chapter <= 0) {
         throw new Error("chapter must be > 0");
       }
+      // ChapterRunner injects sessionOverride so a completed chapter can be
+      // re-planned. Engine LLM never sets this; do not use pendingRewrites here.
+      const sessionOverride = args.sessionOverride === true;
       const progress = await requireProgress(store);
-      if (progress.completedChapters.includes(plan.chapter)) {
+      if (!sessionOverride && progress.completedChapters.includes(plan.chapter)) {
         return {
           chapter: plan.chapter,
           skipped: true,
@@ -462,11 +465,14 @@ function commitChapterTool(store: StorePort): Tool {
       if (chapter <= 0) {
         throw new Error("chapter must be > 0");
       }
+      // Session-only: overwrite a completed chapter without Engine saga /
+      // pendingRewrites. Omit this flag (Engine path) to keep sequential commit.
+      const sessionOverride = args.sessionOverride === true;
       const progress = await requireProgress(store);
-      if (progress.phase !== "writing") {
+      if (!sessionOverride && progress.phase !== "writing") {
         throw new Error(`章节提交仅允许在 writing 阶段（当前 phase=${progress.phase}）`);
       }
-      if (progress.completedChapters.includes(chapter)) {
+      if (!sessionOverride && progress.completedChapters.includes(chapter)) {
         return {
           chapter,
           skipped: true,
@@ -474,9 +480,11 @@ function commitChapterTool(store: StorePort): Tool {
           next_chapter: nextChapter(progress),
         };
       }
-      const expected = progress.pendingRewrites[0] ?? nextChapter(progress);
-      if (chapter !== expected) {
-        throw new Error(`只能提交第 ${expected} 章，收到第 ${chapter} 章`);
+      if (!sessionOverride) {
+        const expected = progress.pendingRewrites[0] ?? nextChapter(progress);
+        if (chapter !== expected) {
+          throw new Error(`只能提交第 ${expected} 章，收到第 ${chapter} 章`);
+        }
       }
       const draft = await readText(store, chapterDraftPath(chapter));
       if (draft == null || draft.trim() === "") {
@@ -484,15 +492,25 @@ function commitChapterTool(store: StorePort): Tool {
       }
       const finalPath = chapterFinalPath(chapter);
       await writeText(store, finalPath, draft);
-      const completed = [...progress.completedChapters, chapter];
-      const pending = progress.pendingRewrites.filter((item) => item !== chapter);
+      const completed = progress.completedChapters.includes(chapter)
+        ? [...progress.completedChapters]
+        : [...progress.completedChapters, chapter];
+      const pending = sessionOverride
+        ? [...progress.pendingRewrites]
+        : progress.pendingRewrites.filter((item) => item !== chapter);
       const next: Progress = {
         ...progress,
-        phase: "writing",
+        phase: sessionOverride && progress.phase === "complete" ? "complete" : "writing",
         completedChapters: completed,
         pendingRewrites: pending,
-        currentChapter: Math.max(progress.currentChapter ?? 0, chapter + 1),
-        flow: pending.length > 0 ? progress.flow : "writing",
+        currentChapter: Math.max(
+          progress.currentChapter ?? 0,
+          sessionOverride ? chapter : chapter + 1,
+        ),
+        totalChapters: sessionOverride
+          ? Math.max(progress.totalChapters, chapter)
+          : progress.totalChapters,
+        flow: sessionOverride ? progress.flow : pending.length > 0 ? progress.flow : "writing",
       };
       await store.saveProgress(next);
       const plan = await readJson<ChapterPlan>(store, chapterPlanPath(chapter));

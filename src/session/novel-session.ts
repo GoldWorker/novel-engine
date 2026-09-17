@@ -18,6 +18,7 @@ import { PATHS } from "../store/paths.js";
 import { exportBookSnapshot, importBookSnapshot } from "../store/snapshot.js";
 import {
   FoundationIncompleteError,
+  SessionBusyError,
   SessionClosedError,
   SessionLlmRequiredError,
 } from "./errors.js";
@@ -30,9 +31,11 @@ import {
   missingKeysFromGaps,
   patchFromGeneratedJson,
 } from "./generate.js";
+import { createChapterRunner } from "./chapter.js";
 import { resolveSessionPlanning } from "./planning.js";
 import type {
   AutoWriteResult,
+  ChapterRunner,
   CreateNovelSessionOptions,
   FoundationMeta,
   FoundationPatch,
@@ -52,13 +55,22 @@ export class NovelSessionImpl implements NovelSession {
   readonly bookId: string;
   readonly store: StorePort;
   readonly llm: LlmPort | undefined;
+  readonly chapter: ChapterRunner;
   private closed = false;
+  private busy = false;
   private readonly listeners = new Set<(event: SessionEvent) => void>();
 
   constructor(options: CreateNovelSessionOptions) {
     this.bookId = options.bookId;
     this.store = options.store;
     this.llm = options.llm;
+    this.chapter = createChapterRunner({
+      store: this.store,
+      requireOpen: () => this.assertOpen(),
+      requireLlm: () => this.requireLlm(),
+      withBusy: (fn) => this.withBusy(fn),
+      emit: (event) => this.emit(event),
+    });
   }
 
   get isClosed(): boolean {
@@ -160,6 +172,10 @@ export class NovelSessionImpl implements NovelSession {
 
   async startAutoWrite(options: StartAutoWriteOptions): Promise<AutoWriteResult> {
     this.assertOpen();
+    return this.withBusy(() => this.runAutoWrite(options));
+  }
+
+  private async runAutoWrite(options: StartAutoWriteOptions): Promise<AutoWriteResult> {
     if (options.foundation !== undefined) {
       await this.upsertFoundation(options.foundation);
     }
@@ -208,6 +224,18 @@ export class NovelSessionImpl implements NovelSession {
     const result: AutoWriteResult = { status, result: engineResult, meta };
     this.emit({ type: "stopped", result });
     return result;
+  }
+
+  private async withBusy<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.busy) {
+      throw new SessionBusyError();
+    }
+    this.busy = true;
+    try {
+      return await fn();
+    } finally {
+      this.busy = false;
+    }
   }
 
   private readonly onEngineEvent = (event: EngineLoopEvent): void => {

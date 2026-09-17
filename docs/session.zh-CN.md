@@ -1,4 +1,4 @@
-# 宿主 Session API（`novel-engine/session`）— S0 / S1 / S2
+# 宿主 Session API（`novel-engine/session`）— S0 / S1 / S2 / S3
 
 [English](session.md) | [中文文档](session.zh-CN.md)
 
@@ -8,7 +8,7 @@
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-包版本 **0.3.0**。本文覆盖 **S0 + S1 + S2**。
+包版本 **0.3.0**。本文覆盖 **S0 + S1 + S2 + S3**。
 
 ## 状态
 
@@ -17,7 +17,7 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 | **S0** | 类型、缺口表、`foundationMissing` 分层大纲修复 | 已完成 |
 | **S1** | `createNovelSession` 只读/检查 + `createNovelWorkspace` | 已完成 |
 | **S2** | `generateFoundation` / upsert / 自动写作（结构化 LLM） | 已完成 |
-| **S3** | ChapterRunner / 章节写作 API | 尚未 |
+| **S3** | ChapterRunner / `chapter.get` / `saveFinal` / `write` | 已完成 |
 | **S4** | Worker session 桥 | 尚未 |
 
 S1–S3 使用**同线程** `NovelSession`。这里没有 Worker 版 session。
@@ -53,7 +53,7 @@ await session.inspectFoundation({ prompt: "写一本分层中篇：……" });
 await session.assertReadyToWrite();
 ```
 
-S1 里 `llm` 对只读检查可选。**S2** 的 `generateFoundation` / `startAutoWrite` 必须提供（缺失则 `SessionLlmRequiredError`）。每次读取都是 **store 直读**（Session 不缓存产物）。
+S1 里 `llm` 对只读检查可选。**S2** 的 `generateFoundation` / `startAutoWrite` 以及 **S3** 的 `chapter.write` 必须提供（缺失则 `SessionLlmRequiredError`）。每次读取都是 **store 直读**（Session 不缓存产物）。
 
 | 方法 | 说明 |
 | --- | --- |
@@ -66,11 +66,12 @@ S1 里 `llm` 对只读检查可选。**S2** 的 `generateFoundation` / `startAut
 | `exportSnapshot()` / `importSnapshot(bytes)` | 现有书稿快照 API 的薄封装。 |
 | `upsertFoundation(patch)` | 部分写入 `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules`。指纹文件变化时作废 `meta/foundation_audit.json`。 |
 | `generateFoundation({ prompt, keys, mode? })` | 结构化一次性 `LlmPort.complete`；从 `text` 解析 JSON；再 `upsertFoundation`。**不是** Engine 循环。 |
-| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | 可选 upsert/generate，然后要么 `{ status: "needs_foundation" }`，要么 `createEngine(...).run`。 |
-| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `stopped`。返回取消订阅函数。 |
+| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | 可选 upsert/generate，然后要么 `{ status: "needs_foundation" }`，要么 `createEngine(...).run`。与 `chapter.write` 互斥（`SessionBusyError`）。 |
+| `chapter` | S3 ChapterRunner：`get` / `saveFinal` / `write`。同线程；不是 Engine 全书 Route。 |
+| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`。返回取消订阅函数。 |
 | `close()` | 之后的调用抛 `SessionClosedError`。 |
 
-**不在 S2：** ChapterRunner / `chapter.*`（S3），Worker session 桥（S4）。
+**不在 S3：** Worker session 桥（S4）。
 
 `readyToWrite === true` 当且仅当 `foundationMissing` 为空（与 Engine 的审查 / writing 阶段规则一致）。
 
@@ -131,7 +132,9 @@ const outcome = await session.startAutoWrite({
 4. 若 `requireConfirmGaps !== false`（默认 **true**）且 `gaps.length > 0` → `{ status: "needs_foundation", gaps, meta }`，**不**调用 `Engine.run`
 5. 若已就绪（或关闭了确认）→ `createEngine({ store, llm }).run({ prompt, maxSteps })` → `{ status: "completed" | "stopped", result, meta }`（`stoppedReason === "complete"` 时为 `completed`）
 
-`subscribe` 在 upsert 后发出 `foundation_updated`，每个 Engine `step` 发出 `auto_write_step`，needs-foundation 与 Engine 结束都发出 `stopped`。
+`subscribe` 在 upsert 后发出 `foundation_updated`，每个 Engine `step` 发出 `auto_write_step`，`chapter.write` 过程中发出 `chapter_step`，needs-foundation 与 Engine 结束都发出 `stopped`。
+
+`startAutoWrite` 与 `chapter.write` 共用 busy 标志：其中一个进行中再调用另一个（或自己）会抛 `SessionBusyError`。
 
 ## S1 — `NovelWorkspace`
 
@@ -167,20 +170,56 @@ await ws.close();
 
 工作区会**缓存**每个 `bookId` 第一次拿到的 store。Memory 测试应继续「一书一 `MemoryStore`」（Map 或工厂缓存）。不支持在同一个 store 里用路径前缀区分书籍。
 
+## S3 — ChapterRunner
+
+同线程上的单章 create / continue / rewrite / polish。复用 `src/workers/tools.ts` 里的作者工具（`plan_chapter` / `draft_chapter` / `commit_chapter` / `novel_context` / `read_chapter`）。**不**跑 `Engine.run`，**不**驱动 `pendingRewrites`，也**不是**全书 Route。
+
+```ts
+const view = await session.chapter.get(1);
+await session.chapter.saveFinal(1, "# 风暴之后\n\n……");
+const written = await session.chapter.write({
+  chapter: 1,
+  mode: "create", // 或 continue | rewrite | polish
+  title: "风暴之后",
+  instruction: "灯塔视角",
+});
+```
+
+| 方法 | 说明 |
+| --- | --- |
+| `chapter.get(n)` | 从 `drafts/NN.*`、`chapters/NN.md`、`summaries/NN.json` 读 `{ chapter, plan, draft, final, summary }`。都没有则为 `null`。 |
+| `chapter.saveFinal(n, markdown)` | 写入 `chapters/NN.md`，并合理更新 `progress.completedChapters` / checkpoint。不调用 LLM。 |
+| `chapter.write({ chapter, mode, instruction?, title?, force? })` | 专用作者循环：`LlmPort` + 现有 writer 工具。必须提供 `llm`。 |
+
+### 模式
+
+| 模式 | 前置条件 | 行为 |
+| --- | --- | --- |
+| `create` | 没有终稿（除非 `force: true`） | `plan_chapter` → `draft_chapter(write)` → `commit_chapter`。已有终稿 → `ChapterConflictError`。 |
+| `continue` | 有草稿、无终稿 | 用 `draft_chapter(append)` 续写再提交。 |
+| `rewrite` | 已有终稿 | 按 `instruction` 重新 plan/draft/commit。覆盖已完成章（session override；**不是** `pendingRewrites`）。 |
+| `polish` | 已有终稿 | 轻度改写现有终稿（同一工具路径，打磨向提示）。 |
+
+`chapter.write` 只在 `plan_chapter` / `commit_chapter` 上注入内部 `sessionOverride`，以便覆盖已完成章。没有该标志时，Engine 的顺序提交 saga 不变。
+
+MockLlm：脚本 `toolCalls`（与 S2 `generateFoundation` 用 `text` 里的 JSON 不同）。
+
 ## 错误
 
 | 错误 | 何时 |
 | --- | --- |
 | `FoundationIncompleteError` | `assertReadyToWrite` — `.gaps` 即检查表。 |
-| `SessionLlmRequiredError` | `generateFoundation` / Engine 版 `startAutoWrite` 未提供 `llm`。 |
+| `SessionLlmRequiredError` | `generateFoundation` / Engine 版 `startAutoWrite` / `chapter.write` 未提供 `llm`。 |
 | `FoundationGenerateError` | 非法 `keys`，或 `complete().text` 不是 JSON 对象。 |
+| `SessionBusyError` | `startAutoWrite` 或 `chapter.write` 进行中再调用另一个（或自己）。 |
+| `ChapterConflictError` | 模式前置失败（create 时已有终稿、continue 没有草稿、rewrite/polish 没有终稿）。 |
+| `ChapterRunnerError` | 非法章节号、空的 `saveFinal`、或作者循环没有产出终稿。 |
 | `SessionClosedError` | 对已关闭 session 调用（包括 `switchTo` 之后）。 |
 | `WorkspaceClosedError` | 工作区 `close()` 之后。 |
 | `BookNotFoundError` | `open` / `switchTo` 未知 `bookId`。 |
 
 ## 后续
 
-- **S3** — ChapterRunner
 - **S4** — Worker session 桥
 
 示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)。

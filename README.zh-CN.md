@@ -17,7 +17,7 @@
 ## 不包含什么
 
 - 默认 `novel-engine` / `novel-engine/worker` 包里的供应商 LLM 客户端——请自行注入 `LlmPort`，或导入可选的 [`novel-engine/llm`](docs/llm-adapters.zh-CN.md)（fetch 适配器；**不要把 API Key 放进公开浏览器应用**）
-- 默认包里的宿主 Session——请导入可选的 [`novel-engine/session`](docs/session.zh-CN.md)（S0–S2 检查、生成、自动写作、工作区；S3 ChapterRunner / S4 Worker session 尚未包含）
+- 默认包里的宿主 Session——请导入可选的 [`novel-engine/session`](docs/session.zh-CN.md)（S0–S3 检查、生成、自动写作、ChapterRunner、工作区；S4 Worker session 尚未包含）
 - React 包、Demo SPA 或任何可视化应用
 - Arbiter（仲裁器）完整语义场景（`plan_start` 只是关键词桩）
 - ChapterAdvanceGate 审阅模式 UI
@@ -57,7 +57,7 @@ npm install novel-engine
 | `.` | `novel-engine` | Engine、stores、client、mocks、snapshot、`route` |
 | `./worker` | `novel-engine/worker` | `attachEngineWorker` + Engine/stores，供专用 Worker 使用 |
 | `./llm` | `novel-engine/llm` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope） |
-| `./session` | `novel-engine/session` | 可选同线程宿主 Session（检查 + 工作区） |
+| `./session` | `novel-engine/session` | 可选同线程宿主 Session（检查 + ChapterRunner + 工作区） |
 
 发布的 `files`：`dist/`、`README.md`、`LICENSE`。
 
@@ -75,7 +75,7 @@ npm install novel-engine
 | [4. 嵌入 Web Worker](#scenario-worker) | 专用 Worker + 主线程 client：`start` / `steer` / `pause` / `resume` / `snapshot`。 | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. 书稿快照导入导出](#scenario-snapshot) | 把 store 中每个路径打成 zip（fflate），再 merge 进另一个 `StorePort`。 | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. 注入真实 LLM](#scenario-llm) | 宿主侧通过可选的 `novel-engine/llm` 得到 OpenAI / Anthropic / DashScope 的 `LlmPort`。密钥放在 BFF。 | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
-| [7. 宿主 Session（检查 + 生成 + 工作区）](#scenario-session) | 同线程 `NovelSession` / `NovelWorkspace`：基础设定缺口、结构化 JSON 生成、可选 Engine 自动写作。无 ChapterRunner / Worker session（S3–S4）。 | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
+| [7. 宿主 Session（检查 + 生成 + ChapterRunner + 工作区）](#scenario-session) | 同线程 `NovelSession` / `NovelWorkspace`：基础设定缺口、结构化 JSON 生成、可选 Engine 自动写作、单章 ChapterRunner。无 Worker session（S4）。 | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
 
 `plan_start` 是**确定性桩**（无 Arbiter LLM）：提示词含 `长篇` 则选 `architect_long` / `long`；含 `中篇` 或 `分层` 则选 `architect_long` / `mid`；否则 `architect_short` / `short`。Worker 失败会重试一次，然后暂停。同一条 Route 指令连续五次也会暂停（死锁上限）。
 
@@ -333,9 +333,9 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 ### 7. 宿主 Session（`novel-engine/session`）
 
-**何时：** 同线程宿主想检查一份 store 是否写得动，用结构化 LLM JSON 补齐基础设定，或在多本书之间切换。
+**何时：** 同线程宿主想检查一份 store 是否写得动，用结构化 LLM JSON 补齐基础设定，单章写作或重写，或在多本书之间切换。
 
-可选子路径。S0–S2：`getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / 工作区 `createBook` / `switchTo`。中长篇只要有有效的 `layered_outline.json`，不再需要扁平 `outline.json`。`generateFoundation` 是 **`LlmPort.complete().text` 里的一次性 JSON**，不是 Engine 循环。**尚未包含：** ChapterRunner（S3）、Worker session（S4）。
+可选子路径。S0–S3：`getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / 工作区 `createBook` / `switchTo`。中长篇只要有有效的 `layered_outline.json`，不再需要扁平 `outline.json`。`generateFoundation` 是 **`LlmPort.complete().text` 里的一次性 JSON**，不是 Engine 循环。`chapter.write` 是**专用作者循环**（复用 writer 工具；不是 `Engine.run` / 不是 `pendingRewrites`）。**尚未包含：** Worker session（S4）。
 
 详情：[docs/session.zh-CN.md](docs/session.zh-CN.md)（[English](docs/session.md)）。示意：[`examples/session-workspace.ts`](examples/session-workspace.ts)。
 
@@ -354,6 +354,7 @@ const outcome = await session.startAutoWrite({
   requireConfirmGaps: true,
 });
 // 在审查 / writing 阶段就绪之前，outcome.status === "needs_foundation"
+await session.chapter.write({ chapter: 1, mode: "create", title: "风暴之后" });
 
 const stores = new Map<string, MemoryStore>();
 const ws = createNovelWorkspace({

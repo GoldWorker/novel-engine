@@ -5,6 +5,8 @@ import type { LlmPort } from "../ports/llm.js";
 import type { StorePort } from "../ports/store.js";
 import type {
   BookMetadata,
+  ChapterPlan,
+  ChapterSummary,
   Character,
   FoundationAudit,
   OutlineEntry,
@@ -51,7 +53,7 @@ export interface InspectResult {
 
 export interface CreateNovelSessionOptions {
   store: StorePort;
-  /** Required for S2 `generateFoundation` / `startAutoWrite`. Optional for inspect-only. */
+  /** Required for S2 generate / auto-write and S3 `chapter.write`. Optional for inspect-only. */
   llm?: LlmPort;
   bookId: string;
 }
@@ -111,15 +113,50 @@ export interface AutoWriteEngineOutcome {
 
 export type AutoWriteResult = AutoWriteNeedsFoundation | AutoWriteEngineOutcome;
 
+export const CHAPTER_WRITE_MODES = ["create", "continue", "rewrite", "polish"] as const;
+export type ChapterWriteMode = (typeof CHAPTER_WRITE_MODES)[number];
+
+export interface ChapterView {
+  chapter: number;
+  plan: ChapterPlan | null;
+  draft: string | null;
+  final: string | null;
+  summary: ChapterSummary | null;
+}
+
+export interface ChapterWriteInput {
+  chapter: number;
+  mode: ChapterWriteMode;
+  instruction?: string;
+  title?: string;
+  /** When `mode` is `create` and a final already exists, overwrite instead of `ChapterConflictError`. */
+  force?: boolean;
+}
+
+export interface ChapterWriteResult {
+  chapter: number;
+  mode: ChapterWriteMode;
+  view: ChapterView;
+  turns: number;
+}
+
+export interface ChapterRunner {
+  get(chapter: number): Promise<ChapterView | null>;
+  saveFinal(chapter: number, markdown: string): Promise<void>;
+  write(input: ChapterWriteInput): Promise<ChapterWriteResult>;
+}
+
 export type SessionEvent =
   | { type: "foundation_updated"; meta: FoundationMeta }
   | { type: "auto_write_step"; step: number; instruction: Instruction }
-  | { type: "stopped"; result: AutoWriteResult };
+  | { type: "stopped"; result: AutoWriteResult }
+  | { type: "chapter_step"; chapter: number; mode: ChapterWriteMode; step: number; tool?: string };
 
 export type SessionUnsubscribe = () => void;
 
 export interface NovelSession {
   readonly bookId: string;
+  readonly chapter: ChapterRunner;
   getFoundation(): Promise<FoundationMeta>;
   getProgress(): Promise<Progress | null>;
   inspectFoundation(options?: { prompt?: string }): Promise<InspectResult>;
@@ -140,7 +177,7 @@ export interface CreateNovelWorkspaceOptions {
    * Memory tests should return a cached `MemoryStore` (or let the workspace cache it).
    */
   createStore: (bookId: string) => StorePort | Promise<StorePort>;
-  /** Forwarded to each book session (required for S2 generate / auto-write). */
+  /** Forwarded to each book session (required for S2 generate / auto-write and S3 `chapter.write`). */
   llm?: LlmPort;
   /** Optional dedicated store for the lightweight `_index.json` book list. */
   indexStore?: StorePort;

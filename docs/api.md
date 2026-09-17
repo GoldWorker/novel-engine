@@ -15,7 +15,7 @@ Host how-to is grouped by scenario in the [root README](../README.md#usage-by-sc
 | `.` | `dist/index.js` | Engine, `route`, domain types, stores, mocks, main-thread client, book snapshot |
 | `./worker` | `dist/worker.js` | `attachEngineWorker` plus Engine / stores / snapshot for a dedicated worker |
 | `./llm` | `dist/llm.js` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope). Not pulled into `.` or `./worker`. |
-| `./session` | `dist/session.js` | Optional same-thread host session (S0–S2 inspect, generate, auto-write, workspace). Not pulled into `.` / `./worker` / `./llm`. |
+| `./session` | `dist/session.js` | Optional same-thread host session (S0–S3 inspect, generate, auto-write, ChapterRunner, workspace). Not pulled into `.` / `./worker` / `./llm`. |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
@@ -139,24 +139,27 @@ Sketch: [`examples/llm-openai.ts`](../examples/llm-openai.ts).
 
 ## Optional host session (`novel-engine/session`)
 
-Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, and multi-book workspace. Guide: [session.md](session.md) ([中文](session.zh-CN.md)). Scenario: [README §7](../README.md#scenario-session).
+Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, S3 ChapterRunner, and multi-book workspace. Guide: [session.md](session.md) ([中文](session.zh-CN.md)). Scenario: [README §7](../README.md#scenario-session).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `createNovelSession({ store, llm?, bookId })` | fn | Same-thread session. `llm` required for S2 generate / auto-write. |
-| `NovelSession` | type | Inspect + `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `subscribe` / snapshot wrappers / `close`. |
+| `createNovelSession({ store, llm?, bookId })` | fn | Same-thread session. `llm` required for S2 generate / auto-write and S3 `chapter.write`. |
+| `NovelSession` | type | Inspect + `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter` / `subscribe` / snapshot wrappers / `close`. |
 | `createNovelWorkspace({ createStore, llm?, indexStore? })` | fn | One store per `bookId`. Optional `indexStore` persists `_index.json`. |
 | `NovelWorkspace` | type | `createBook` / `open` / `switchTo` / `listBooks` / `close` / `currentBookId`. |
 | `FoundationMeta` / `FoundationGap` / `InspectResult` / `PlanningInfo` | types | Inspect payload. Gaps include bilingual hints. |
 | `FoundationPatch` / `FoundationKey` / `FOUNDATION_KEYS` / `GenerateFoundationOptions` / `StartAutoWriteOptions` / `AutoWriteResult` / `SessionEvent` | types | S2 generate / auto-write. |
+| `ChapterRunner` / `ChapterView` / `ChapterWriteInput` / `ChapterWriteResult` / `ChapterWriteMode` / `CHAPTER_WRITE_MODES` | type / const | S3 ChapterRunner. Modes: `create` / `continue` / `rewrite` / `polish`. |
 | `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`. |
 | `SessionLlmRequiredError` / `FoundationGenerateError` | class | Missing `llm`; bad generate JSON / keys. |
+| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` already in flight. |
+| `ChapterConflictError` / `ChapterRunnerError` | class | Chapter mode precondition; writer loop / `saveFinal` failure. |
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | Closed session/workspace; unknown `bookId`. |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`. |
 
-**Not in S2:** ChapterRunner, Worker session bridge (S3–S4).
+**Not in S3:** Worker session bridge (S4).
 
-`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). `fill_missing` (default) only upserts keys that are still gaps.
+`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). `fill_missing` (default) only upserts keys that are still gaps. `chapter.write` is a dedicated writer loop (MockLlm `toolCalls`); it does not run `Engine.run` or drive `pendingRewrites`.
 
 Sketch: [`examples/session-workspace.ts`](../examples/session-workspace.ts).
 
