@@ -2,9 +2,7 @@
 
 [English](guide.md) | [中文文档](guide.zh-CN.md)
 
-How-to for host apps. **Kit is the default path.** Engine and Session are advanced. Copy a snippet, then open the linked `examples/*.ts` for the full runnable file.
-
-Contracts (exports, Session S0–S6, errors): [api](api.md). Internals (`route`, protocols, store layout, Kit init handshake): [architecture](architecture.md). Docs index: [README](README.md).
+How-to for host apps. Copy a snippet, then open the linked `examples/*.ts` for the full runnable file. Internals (`route`, protocols, store layout): [architecture](architecture.md). Contracts: [api](api.md) · [session](session.md). Docs index: [README](README.md).
 
 `examples/` is documentation — not part of `npm test`. In-repo mock runs: `npm run test:short` and `npm run test:layered`.
 
@@ -105,255 +103,16 @@ A sibling checkout with `"novel-engine": "file:../novel-engine"` (after that tre
 
 Packaging internals: [architecture](architecture.md#packaging-exports--local-consume).
 
-<a id="scenario-kit"></a>
+## Getting started
 
-## NovelKit (recommended)
-
-Out-of-the-box host façade. **Create only** (`NovelKit.create` — no `new` + `init`). Defaults **OPFS + Worker**. The package **ships** `dist/novel-kit.worker.js`; hosts do not maintain their own worker source.
-
-Session (`novel-engine/session`) remains the reference implementation. Kit is composition + defaults + the shipped worker. Business rules (confirm gate, whole-file replace, `rewriteChapters` default false, no mid-session LLM swap) stay on Session.
-
-Contracts: [api](api.md#optional-novelkit-novel-enginekit). Internals / init handshake: [architecture](architecture.md#kit-worker-init). Copy-paste Session flows: [Advanced: Session](#scenario-session).
-
-### Defaults
-
-| Option | Default | Opt out |
-| --- | --- | --- |
-| `store` | `"opfs"` | `"memory"` (Node/tests) or a `StorePort` (`runtime: "main"` only) |
-| `runtime` | `"worker"` | `"main"` (Node/tests) |
-| `workspace` | `true` | `false` — `createBook` / `switchBook` / `listBooks` throw |
-| `bookId` | `"default"` | pass any non-empty string |
-| `llmEndpoint` | `"/api/llm"` | your BFF route |
-| `fallbackToMemory` | `true` | `false` throws `OpfsUnavailableError` when OPFS is missing |
-
-Readonly on the instance: `bookId`, `storeKind` (`"opfs"` \| `"memory"` \| `"custom"`), `runtime`.
-
-### Browser (default OPFS + Worker)
+**Out-of-the-box (recommended for a browser workbench):** [`novel-engine/kit`](guide-kit.md) — `NovelKit.create`, shipped worker, defaults OPFS + Worker. Node/tests: `runtime: "main"` + `store: "memory"`.
 
 ```ts
 import { NovelKit } from "novel-engine/kit";
-// relative dist:
-// import { NovelKit } from "../../vendor/novel-engine/dist/kit.js";
 
-const kit = await NovelKit.create({
-  llmEndpoint: "/api/llm", // worker LlmPort.complete → fetch(llmEndpoint). No API keys in the worker.
-  // bookId omitted → "default"
-});
-
+const kit = await NovelKit.create({ llmEndpoint: "/api/llm" });
 const { gaps, readyToWrite } = await kit.inspect({ prompt: "写一本三章短篇" });
-await kit.fillFoundation({ book: { title: "无主的信", synopsis: "灯塔与潮" } });
-const outcome = await kit.startBook({
-  prompt: "写一本三章短篇：……",
-  generateMissing: true, // may return { status: "needs_foundation", gaps }
-});
-
-kit.subscribe((event) => {
-  console.log(event.type);
-});
-kit.dispose(); // closes the session and terminates the worker
 ```
-
-`llm` is **ignored** in worker mode even if you pass it — the worker always uses `llmEndpoint`. Pass `llm` only for `runtime: "main"`. Put vendor keys on a BFF — see [Security](#security).
-
-Canonical sketch: [`examples/kit-host.ts`](../examples/kit-host.ts).
-
-### Node / tests (main + memory)
-
-`llm` is **required** on `runtime: "main"`.
-
-```ts
-import { MockLlm } from "novel-engine";
-import { NovelKit } from "novel-engine/kit";
-
-const kit = await NovelKit.create({
-  runtime: "main",
-  store: "memory",
-  llm: new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]),
-  bookId: "letter",
-});
-```
-
-### Shipped worker URL
-
-`NovelKit.create` resolves:
-
-```ts
-new URL("./novel-kit.worker.js", import.meta.url); // relative to dist/kit.js
-```
-
-That works for vendored / `file:` copies that keep `dist/` together. If a bundler rewrites `import.meta.url` so the worker 404s, copy `node_modules/novel-engine/dist/novel-kit.worker.js` (or `vendor/.../dist/novel-kit.worker.js`) into the host **`public/`** (or equivalent) and pass `workerUrl`:
-
-```ts
-await NovelKit.create({
-  workerUrl: "/novel-kit.worker.js",
-  llmEndpoint: "/api/llm",
-});
-```
-
-Do **not** hand-write a session worker for Kit. The published file already runs `attachSessionWorker` + `createNovelSession` + OPFS/memory after an **init** handshake. Init protocol: [architecture](architecture.md#kit-worker-init).
-
-### Worker LLM
-
-On create, main posts **init** (`ns: "kit"`) with `llmEndpoint`, `bookId`, and OPFS options, waits for **ready**, then attaches the existing Session bridge (`ns: "session"`). The worker `LlmPort.complete` is `fetch(llmEndpoint)` with the completion request JSON. Put vendor keys on the BFF, not in the worker.
-
-### Scenario methods
-
-Names map 1:1 onto Session (no second copy of the rules):
-
-| Kit | Session |
-| --- | --- |
-| `inspect` | `inspectFoundation` |
-| `assertReady` | `assertReadyToWrite` |
-| `fillFoundation` | `upsertFoundation` |
-| `generateFoundation` | `generateFoundation` |
-| `startBook` | `startAutoWrite` |
-| `assessFoundation` | `assessFoundationImpact` |
-| `applyFoundation` | `applyFoundationChange` |
-| `getChapter` / `writeChapter` / `saveChapter` | `chapter.get` / `write` / `saveFinal` |
-| `getMeta` / `getProgress` / `listArtifacts` | `getFoundation` / `getProgress` / `listArtifacts` |
-| `createBook` / `switchBook` / `listBooks` | workspace APIs |
-| `exportBook` / `importBook` | `exportSnapshot` / `importSnapshot` |
-| `subscribe` / `dispose` | `subscribe` / `close` (+ `worker.terminate`) |
-
-Preserved Session behavior:
-
-- Assess a **proposed** patch (`assessFoundation`) **before** `applyFoundation` / `fillFoundation`.
-- `applyFoundation` without `confirmRewrite` returns `{ status: "needs_confirm" }` when severity is `rewrite_needed`. `confirmRewrite: true` never yields `needs_confirm`. Prefer the **two-step** apply.
-- `characters` / `worldRules` / `outline` / `layeredOutline` are **whole-file replace**.
-- `rewriteChapters` default **false** — chapters never auto-rewrite. `rewriteChapters: true` with `suggestedMode === "none"` writes no chapters unless the host also passes `mode: "rewrite" | "polish"`.
-- Guard `getProgress()` null before `latestCompleted` / `nextChapter`.
-- No mid-session LLM swap (worker endpoint is fixed at init).
-
-`startBook` may return `{ status: "needs_foundation" }` without `Engine.run` (default `requireConfirmGaps: true`).
-
-When `workspace: false` (or a custom `StorePort`), multi-book methods throw a clear `KitWorkspaceDisabledError`.
-
-Two-step `rewrite_needed` on Kit:
-
-```ts
-const patch = { characters: [{ name: "林深", role: "主角" }] }; // whole-file replace
-
-const assessment = await kit.assessFoundation(patch);
-// assessment.severity / suggestedChapters / suggestedMode / reasons — no write
-
-let outcome = await kit.applyFoundation({ patch });
-if (outcome.status === "needs_confirm") {
-  // show outcome.assessment.reasons — store unchanged
-  outcome = await kit.applyFoundation({
-    patch,
-    confirmRewrite: true,    // host acknowledged the blast radius
-    rewriteChapters: false,  // still no auto chapter rewrite unless the host opts in
-  });
-}
-```
-
-Same audited flows with Session names: [7.2a–7.2e](#scenario-session-impact).
-
-### What Kit is not
-
-- Not a second Engine or a second Session. Underlying Session / Engine / Session worker protocol stay as today.
-- Not `novel-engine/worker` (Engine worker). Kit’s worker is `novel-engine/kit/worker`.
-- Real OPFS is not required for CI — tests use `runtime: "main"` + `store: "memory"`, plus fake-port init wiring.
-
-Pitfalls (assess-before-apply, whole-file replace, null `getProgress()`): [below](#pitfalls).
-
-<a id="scenario-llm"></a>
-
-## LLM adapters (`novel-engine/llm`)
-
-**When:** A trusted Node host, Electron, or a **server BFF** needs a real `LlmPort`. Not for shipping raw API keys in a public SPA.
-
-Optional subpath. Fetch-based OpenAI, Anthropic, and DashScope adapters so vendor HTTP clients never land in the default `novel-engine` or `novel-engine/worker` bundles. There is **no** `openai` / `@anthropic-ai/sdk` dependency. Adapters call `fetch` (injectable). Node ≥18 and modern browsers already provide it.
-
-Exports: [api](api.md#optional-vendor-llm-novel-enginellm). Sketch: [`examples/llm-openai.ts`](../examples/llm-openai.ts).
-
-```ts
-import {
-  createOpenAiLlm,
-  createAnthropicLlm,
-  createDashScopeLlm,
-  createVendorLlm,
-  LlmAdapterError,
-} from "novel-engine/llm";
-```
-
-Shared options: `apiKey`, `model`, optional `baseUrl`, `fetch`, `headers`.
-
-| Factory | Default `baseUrl` | Auth | HTTP |
-| --- | --- | --- | --- |
-| `createOpenAiLlm` | `https://api.openai.com/v1` | `Authorization: Bearer` | `POST {baseUrl}/chat/completions` |
-| `createAnthropicLlm` | `https://api.anthropic.com` | `x-api-key` + `anthropic-version` | `POST {baseUrl}/v1/messages` |
-| `createDashScopeLlm` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | same as OpenAI | same as OpenAI |
-| `createVendorLlm({ provider, ... })` | per provider above | per provider | per provider |
-
-`createDashScopeLlm` **reuses** the OpenAI-shaped client. Pass `baseUrl` for Singapore / US / other regions (must include `/compatible-mode/v1`). Example: `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`.
-
-Anthropic extra options: `maxTokens` (default `4096`), `anthropicVersion` (default `2023-06-01`). HTTP failures throw `LlmAdapterError` (`status?`, `body?`).
-
-### Mapping
-
-`LlmCompletionRequest` → vendor chat/tools:
-
-- **Messages** — `system` / `user` / `assistant` / `tool` (`toolCallId`, `name`)
-- **Tools** — Engine specs are `{ name, description }` only. Adapters send a permissive JSON object schema (`additionalProperties: true`)
-- **`agent`** — used by the Engine for routing/logging; **not** forwarded as a vendor body field (unknown keys can 400)
-
-Vendor response → `LlmCompletionResult`:
-
-- Assistant text (empty string when the model only issued tool calls)
-- `toolCalls[]` with `id`, `name`, and `arguments` as a **parsed object** (OpenAI's JSON string and Anthropic's `input` object are both normalized)
-
-Engine tool rounds send an assistant message **without** embedded `tool_calls`, then `role: "tool"` results. Adapters reconstruct the vendor-required assistant `tool_calls` / `tool_use` blocks from those following tool messages so the next turn is valid.
-
-### Same-thread host
-
-```ts
-import { createEngine, MemoryStore } from "novel-engine";
-import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
-
-const llm = createOpenAiLlm({
-  apiKey: "sk-replace-me", // BFF / trusted host env — never a public SPA
-  model: "gpt-4o-mini",
-});
-// createAnthropicLlm({ apiKey, model: "claude-sonnet-4-20250514" })
-// createDashScopeLlm({ apiKey, model: "qwen-plus" })
-// createVendorLlm({ provider: "dashscope", apiKey, model: "qwen-plus" })
-
-const engine = createEngine({ store: new MemoryStore(), llm });
-await engine.run({ prompt: "写一本三章短篇：……" });
-```
-
-### BFF / Worker
-
-Keep the worker bundle free of keys when the UI is public. Kit already `fetch(llmEndpoint)`. For a host-owned Engine worker, prefer a same-origin BFF:
-
-```ts
-import { attachEngineWorker } from "novel-engine/worker";
-import type { LlmPort } from "novel-engine/worker";
-
-const llm: LlmPort = {
-  async complete(request) {
-    const response = await fetch("/api/novel-llm", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(request),
-    });
-    return response.json();
-  },
-};
-
-attachEngineWorker(self, {
-  async createPorts() {
-    return { store: /* OpfsStore */, llm };
-  },
-});
-```
-
-The BFF can call `createOpenAiLlm` / `createDashScopeLlm` / `createAnthropicLlm` with a server-side key.
-
-Out of scope: streaming, vision, vendor SDK packages, putting keys in this repo, wiring a Next.js app inside novel-engine.
-
-## Advanced: Engine
 
 Same-thread Engine with `MemoryStore` + `MockLlm` (package-name imports; use the relative `dist/` paths above when vendoring without `file:`):
 
@@ -370,7 +129,23 @@ const engine = createEngine({
 const result = await engine.run({ prompt });
 ```
 
-`plan_start` is a keyword stub: `长篇` → long, `中篇`/`分层` → mid, else short.
+Same-thread Session (optional `novel-engine/session`):
+
+```ts
+import { MemoryStore } from "novel-engine";
+import { createNovelSession } from "novel-engine/session";
+
+const session = await createNovelSession({
+  store: new MemoryStore(),
+  llm, // optional for inspect / S5 heuristics
+  bookId: "letter",
+});
+const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "写一本三章短篇" });
+```
+
+`plan_start` is a keyword stub: `长篇` → long, `中篇`/`分层` → mid, else short. Vendor keys belong on a BFF — see [Security](#security).
+
+## Engine scenarios
 
 | Scenario | When | Source |
 | --- | --- | --- |
@@ -379,8 +154,9 @@ const result = await engine.run({ prompt });
 | [3. OPFS persist](#scenario-opfs) | Keep artifacts across reloads | [`opfs-store.ts`](../examples/opfs-store.ts) |
 | [4. Engine Worker](#scenario-worker) | Loop off the UI thread | [`engine.worker.ts`](../examples/engine.worker.ts) + [`worker-host.ts`](../examples/worker-host.ts) |
 | [5. Book snapshot](#scenario-snapshot) | Zip / merge-restore a store | [`snapshot-roundtrip.ts`](../examples/snapshot-roundtrip.ts) |
+| [6. Real LLM adapters](#scenario-llm) | OpenAI / Anthropic / DashScope via BFF | [`llm-openai.ts`](../examples/llm-openai.ts) |
 
-Scenarios compose: the Worker example already calls `createOpfsStore()`; snapshot works with any `StorePort`. Real LLM: [above](#scenario-llm).
+Scenarios compose: the Worker example already calls `createOpfsStore()`; snapshot works with any `StorePort`.
 
 <a id="scenario-short-book"></a>
 
@@ -494,9 +270,9 @@ export async function openOrThrow(): Promise<StorePort> {
 
 ### 4. Embed in a Web Worker
 
-**When:** The Engine loop should not block the UI thread. Prefer [Kit](#scenario-kit) unless you need a host-owned Engine worker.
+**When:** The Engine loop should not block the UI thread.
 
-The worker bundle is a **separate entry**. Host-owned worker file: inject your `LlmPort` there. Prefer a BFF in production ([LLM adapters](#scenario-llm)). `pause` / `steer` take effect after the current Worker instruction.
+The worker bundle is a **separate entry**. Host-owned worker file: inject your `LlmPort` there. Prefer a BFF in production ([scenario 6](#scenario-llm)). `pause` / `steer` take effect after the current Worker instruction.
 
 Protocol overview: [architecture](architecture.md#engine-worker-protocol-engine_protocol). Full pair: [`examples/engine.worker.ts`](../examples/engine.worker.ts) + [`examples/worker-host.ts`](../examples/worker-host.ts). Copy **both**.
 
@@ -508,7 +284,7 @@ import type { LlmPort } from "novel-engine/worker";
 
 const llm: LlmPort = {
   async complete() {
-    // gateway / WebLLM / novel-engine/llm behind a BFF — see LLM adapters
+    // gateway / WebLLM / novel-engine/llm behind a BFF — see scenario 6
     return { text: "", toolCalls: [] };
   },
 };
@@ -581,11 +357,35 @@ try {
 // dest has chapters/01.md from the snapshot; extra/host.json is kept
 ```
 
-## Advanced: Session
+<a id="scenario-llm"></a>
 
-Optional `novel-engine/session`. Same-thread inspect, generate, mid-story foundation change (assess → confirm → apply), single-chapter write, multi-book workspace. Off-thread: [scenario 8](#scenario-session-worker). Prefer [Kit](#scenario-kit) unless you need the reference API directly.
+### 6. Inject a real LLM (`novel-engine/llm`)
 
-Contracts, errors, S0–S6, protocol: [api](api.md#optional-host-session-novel-enginesession). Sketch: [`examples/session-workspace.ts`](../examples/session-workspace.ts).
+**When:** A trusted Node host, Electron, or a **server BFF** needs a real `LlmPort`. Not for shipping raw API keys in a public SPA.
+
+Optional subpath. Fetch-based OpenAI, Anthropic, and DashScope adapters. No `openai` / `@anthropic-ai/sdk` packages. Details: [llm-adapters.md](llm-adapters.md). Sketch: [`examples/llm-openai.ts`](../examples/llm-openai.ts).
+
+```ts
+import { createEngine, MemoryStore } from "novel-engine";
+import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
+
+const llm = createOpenAiLlm({
+  apiKey: "sk-replace-me", // BFF / trusted host env — never a public SPA
+  model: "gpt-4o-mini",
+});
+// createAnthropicLlm({ apiKey, model: "claude-sonnet-4-20250514" })
+// createDashScopeLlm({ apiKey, model: "qwen-plus" })
+// createVendorLlm({ provider: "dashscope", apiKey, model: "qwen-plus" })
+
+const engine = createEngine({ store: new MemoryStore(), llm });
+await engine.run({ prompt: "写一本三章短篇：……" });
+```
+
+## Session host flows
+
+Optional `novel-engine/session`. Same-thread inspect, generate, mid-story foundation change (assess → confirm → apply), single-chapter write, multi-book workspace. Off-thread: [scenario 8](#scenario-session-worker).
+
+Contracts and errors: [session.md](session.md). Sketch: [`examples/session-workspace.ts`](../examples/session-workspace.ts).
 
 ```ts
 import { MemoryStore } from "novel-engine";
@@ -593,7 +393,6 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 
 const store = new MemoryStore();
 const session = await createNovelSession({ store, llm, bookId: "letter" });
-const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "写一本三章短篇" });
 ```
 
 `generateFoundation` is **one-shot JSON in `LlmPort.complete().text`**, not an Engine loop. `chapter.write` is a **dedicated writer loop** (not `Engine.run` / not `pendingRewrites`). `assessFoundationImpact` is **rules-first** and does not mutate. `applyFoundationChange` never auto-rewrites chapters unless `rewriteChapters: true`.
@@ -661,7 +460,7 @@ Fingerprint file changes invalidate `foundation_audit`. Mid/long can supply `lay
 
 **Patch shape:** omitted keys are left unchanged. A provided `characters`, `worldRules`, `outline`, or `layeredOutline` array **replaces the whole file** — omitted names/chapters are deleted, not merged or renamed in place. `{ characters: [{ name: "林深" }] }` removes 林守.
 
-Sketch: [`examples/session-workspace.ts`](../examples/session-workspace.ts). Same calls over a Worker: [8.1](#scenario-session-worker-impact). Kit names: `assessFoundation` / `applyFoundation` ([above](#scenario-kit)).
+Sketch: [`examples/session-workspace.ts`](../examples/session-workspace.ts). Same calls over a Worker: [8.1](#scenario-session-worker-impact).
 
 | Job | Severity | Writes chapters? |
 | --- | --- | --- |
@@ -921,9 +720,9 @@ Cold start with `indexStore`: `listBooks()` restores the catalog but does **not*
 
 ### 8. Session over Worker (`createSessionClient`)
 
-**When:** Auto-write / chapter ops / foundation apply must not block the UI, and vendor keys must stay on a BFF. Prefer [Kit](#scenario-kit) unless you need a host-owned session worker.
+**When:** Auto-write / chapter ops / foundation apply must not block the UI, and vendor keys must stay on a BFF.
 
-Import `attachSessionWorker` from `novel-engine/session` (not `novel-engine/worker`). `LlmPort.complete` should `fetch("/api/llm")`. Protocol: [architecture](architecture.md#session-bridge-session_protocol) · [api S4](api.md#s4--worker-bridge).
+Import `attachSessionWorker` from `novel-engine/session` (not `novel-engine/worker`). `LlmPort.complete` should `fetch("/api/llm")`. Protocol: [architecture](architecture.md#session-bridge-session_protocol) · [session S4](session.md#s4--worker-bridge).
 
 Pair: [`examples/session.worker.ts`](../examples/session.worker.ts) + [`examples/session-host.ts`](../examples/session-host.ts).
 
@@ -966,17 +765,15 @@ Busy (`SessionBusyError`) is the worker-side session flag: an in-flight `applyFo
 
 ## Practical pitfalls
 
-- **Assess the proposed patch** with `assessFoundationImpact(patch)` / Kit `assessFoundation(patch)` **before** `applyFoundationChange` / `applyFoundation` / `upsertFoundation` / `fillFoundation`. After the same content is already written, a second assess typically looks like “no change.”
+- **Assess the proposed patch** with `assessFoundationImpact(patch)` **before** `applyFoundationChange` / `upsertFoundation`. After the same content is already written, a second assess typically looks like “no change.”
 - **`characters` / `worldRules` / `outline` / `layeredOutline` are whole-file replace.** `{ characters: [{ name: "林深" }] }` deletes 林守; it does not rename in place. Include every row you want to keep.
 - **`rewriteChapters: true` with `suggestedMode === "none"`** (typical `meta_only` / `forward_only`) writes no chapters unless the host also passes `mode: "rewrite" | "polish"`.
 - **Guard `getProgress()` null** before `latestCompleted(progress)` / `nextChapter(progress)`.
-- **Two-step confirm:** apply without `confirmRewrite`; if `status === "needs_confirm"`, retry with `confirmRewrite: true`. Passing `confirmRewrite: true` never returns `needs_confirm`. Same for Kit `applyFoundation`.
-- **Keys on a BFF.** Do not embed vendor API keys in a public SPA or Worker bundle. Kit worker always uses `llmEndpoint`.
+- **Two-step confirm:** apply without `confirmRewrite`; if `status === "needs_confirm"`, retry with `confirmRewrite: true`. Passing `confirmRewrite: true` never returns `needs_confirm`.
+- **Keys on a BFF.** Do not embed vendor API keys in a public SPA or Worker bundle.
 
 <a id="security"></a>
 
 ## Security
 
-**Do not put raw provider API keys in a public web app.** A browser bundle that calls OpenAI / Anthropic / DashScope directly exposes the key to anyone who opens DevTools.
-
-Production (including a Next.js workbench) should keep keys on a BFF and have the worker `fetch` that route. Adapter details: [LLM adapters](#scenario-llm).
+**Do not put raw provider API keys in a public web app.** Production (including a Next.js workbench) should keep keys on a BFF and have the worker `fetch` that route. Adapter details: [llm-adapters.md](llm-adapters.md).

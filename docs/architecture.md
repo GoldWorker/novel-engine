@@ -2,7 +2,7 @@
 
 [English](architecture.md) | [中文文档](architecture.zh-CN.md)
 
-Internals for contributors and deep integrators. Host how-to: [guide](guide.md). Stable exports: [api](api.md).
+Internals for contributors and deep integrators. Host how-to: [guide](guide.md). Stable exports: [api](api.md). Session contracts: [session](session.md).
 
 ## Ports & Adapters
 
@@ -145,7 +145,7 @@ Notices: `result` | `event` | `error`.
 
 There is no Workspace-over-Worker: keep `createNovelWorkspace` on the UI thread and open one session worker per book. **Kit** (`novel-engine/kit`) does that composition for you (and ships the worker).
 
-Contracts: [api](api.md#s4--worker-bridge). Host how-to: [guide §8](guide.md#scenario-session-worker). Kit: [guide](guide.md#scenario-kit).
+Contracts: [session.md](session.md#s4--worker-bridge). Host how-to: [guide §8](guide.md#scenario-session-worker). Kit: [guide-kit](guide-kit.md).
 
 <a id="kit-worker-init"></a>
 
@@ -186,7 +186,7 @@ Fingerprint: a missing `outline.json` is skipped when a valid layered outline is
 
 `upsertFoundation` / `applyFoundationChange` **invalidate** `meta/foundation_audit.json` when any fingerprint file changes (`book`, `premise`, `outline`, `characters`, `world_rules`, `layered_outline`): `StorePort.remove` when implemented, otherwise a cleared audit record.
 
-Provided `characters` / `worldRules` / `outline` / `layeredOutline` arrays **replace the whole JSON file**. Omitted patch keys stay unchanged. See [api](api.md#upsertfoundationpatch) and [guide pitfalls](guide.md#pitfalls).
+Provided `characters` / `worldRules` / `outline` / `layeredOutline` arrays **replace the whole JSON file**. Omitted patch keys stay unchanged. See [session](session.md#upsertfoundationpatch) and [guide pitfalls](guide.md#pitfalls).
 
 ## ChapterRunner vs `Engine.run` vs `pendingRewrites`
 
