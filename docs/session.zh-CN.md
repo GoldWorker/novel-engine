@@ -66,7 +66,7 @@ S1 里 `llm` 对只读检查 / S5 启发式可选。**S2** 的 `generateFoundati
 | `assertReadyToWrite({ prompt? })` | 未就绪时抛出带 `gaps` 的 `FoundationIncompleteError`。 |
 | `listArtifacts(prefix?)` | `listStorePaths`。 |
 | `exportSnapshot()` / `importSnapshot(bytes)` | 现有书稿快照 API 的薄封装。 |
-| `upsertFoundation(patch)` | 部分写入 `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules`。指纹文件变化时作废 `meta/foundation_audit.json`。 |
+| `upsertFoundation(patch)` | 部分写入 `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules`（省略的键不变；提供的数组整文件替换）。指纹文件变化时作废 `meta/foundation_audit.json`。 |
 | `generateFoundation({ prompt, keys, mode? })` | 结构化一次性 `LlmPort.complete`；从 `text` 解析 JSON；再 `upsertFoundation`。**不是** Engine 循环。 |
 | `assessFoundationImpact(patch, { refineWithLlm? })` | S5：对**拟议**补丁做规则优先影响评估。可选 LLM JSON 精炼。**不写盘**。 |
 | `applyFoundationChange({ patch, confirmRewrite?, rewriteChapters?, … })` | S6：评估 → 确认闸门 → upsert → 可选顺序 `chapter.write`。 |
@@ -102,13 +102,13 @@ interface FoundationGap {
 await session.upsertFoundation({
   book: { title: "无主的信", synopsis: "……" },
   premise: "……",
-  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }],
-  characters: [{ name: "林守" }],
-  worldRules: [{ name: "信与潮", description: "……" }],
+  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }], // 整文件替换
+  characters: [{ name: "林守" }], // 整表替换；未出现的名字会被删除
+  worldRules: [{ name: "信与潮", description: "……" }], // 整文件替换
 });
 ```
 
-轻度形状校验后，按现有 `PATHS` 调用 `writeJson` / `writeText`。任何指纹文件（`book`、`premise`、`outline`、`characters`、`world_rules`、`layered_outline`）的写入都会**作废** `meta/foundation_audit.json`（若实现了 `StorePort.remove` 则删除；否则写入已清空的审查记录）。返回最新的 `getFoundation()`。
+轻度形状校验后，按现有 `PATHS` 调用 `writeJson` / `writeText`。**省略的补丁键保持原样。** 一旦提供 `characters`、`worldRules`、`outline` 或 `layeredOutline` 数组，就是**整文件替换**（未出现的名字/章节会被删除，不是合并，也不是就地改名）。提供 `book` / `premise` 时同样整份替换对应产物。任何指纹文件（`book`、`premise`、`outline`、`characters`、`world_rules`、`layered_outline`）的写入都会**作废** `meta/foundation_audit.json`（若实现了 `StorePort.remove` 则删除；否则写入已清空的审查记录）。返回最新的 `getFoundation()`。
 
 ### `generateFoundation({ prompt, keys, mode? })`
 
@@ -258,12 +258,12 @@ await session.chapter.write({ chapter: 1, mode: "create" });
 
 ## S5 — `assessFoundationImpact`
 
-在改完基础设定、重写章节之前，先问 session 影响范围有多大。**规则优先**的启发式是确定性的（MemoryStore 测试、不需要 LLM）。当 `refineWithLlm: true` 且提供了 `LlmPort` 时，可用一次性 JSON 精炼结果——**不能把启发式 `severity` 降级**。从不要求真实供应商（测试用 `MockLlm`）。
+对**拟议**的 `FoundationPatch` 对照当前 store 调用，且必须在 `applyFoundationChange` / `upsertFoundation` **之前**（也在任何章节改写之前）。不要等同一补丁已经写入再评估——再调一次通常会看起来像「没有变更」。**规则优先**的启发式是确定性的（MemoryStore 测试、不需要 LLM）。当 `refineWithLlm: true` 且提供了 `LlmPort` 时，可用一次性 JSON 精炼结果——**不能把启发式 `severity` 降级**。从不要求真实供应商（测试用 `MockLlm`）。
 
 ```ts
 const assessment = await session.assessFoundationImpact({
   book: { title: "无主的信（修订）", synopsis: "……" },
-  characters: [{ name: "林深", role: "主角" }],
+  characters: [{ name: "林深", role: "主角" }], // 整表替换；林守会被删掉
 });
 // assessment.severity: "meta_only" | "forward_only" | "rewrite_needed"
 ```
@@ -278,23 +278,23 @@ const assessment = await session.assessFoundationImpact({
 | `changedKeys` | 实际内容发生变化的基础设定键。 |
 | `source` | `"heuristics"` 或 `"llm"`。 |
 
-启发式查看 `meta/*`、`premise.md`、`outline.json`、`layered_outline.json`、`characters.json`、`world_rules.json`，以及已写的 `chapters/`（`drafts/` 只会写进 notes）。中篇随时允许 upsert/generate 基础设定；本 API **只评估**。**不得**改 store，也不得重写章节。
+启发式查看 `meta/*`、`premise.md`、`outline.json`、`layered_outline.json`、`characters.json`、`world_rules.json`，以及已写的 `chapters/`（`drafts/` 只会写进 notes）。中篇随时允许 upsert/generate 基础设定；本 API **只评估拟议补丁**。**不得**改 store，也不得重写章节。宿主顺序：`assess(patch)` → 可选 UI → `applyFoundationChange({ patch, … })`。
 
 ## S6 — `applyFoundationChange`
 
 编排：评估 → `rewrite_needed` 确认闸门 → `upsertFoundation` → 对 `suggestedChapters` 可选顺序 `chapter.write`。复用 S2/S3 API。章节**不会自动重写**——宿主必须传 `rewriteChapters: true`。
 
 ```ts
-const outcome = await session.applyFoundationChange({
-  patch: { premise: "……", characters: [{ name: "林深" }] },
-  confirmRewrite: true,     // severity 为 rewrite_needed 时需要（默认闸门）
-  rewriteChapters: true,    // 宿主显式选择；默认 false
-  instruction: "按新设定对齐本章",
+let outcome = await session.applyFoundationChange({
+  patch: { premise: "……", characters: [{ name: "林深" }] }, // 整表替换
 });
-
 if (outcome.status === "needs_confirm") {
-  // 用 outcome.assessment.reasons 提示 UI，再带 confirmRewrite: true 重试
-  return;
+  // 用 outcome.assessment.reasons 提示 UI — store 未改
+  outcome = await session.applyFoundationChange({
+    patch: { premise: "……", characters: [{ name: "林深" }] },
+    confirmRewrite: true,
+    // rewriteChapters: true 仅当宿主选择同步章节
+  });
 }
 // outcome.status === "applied"
 // outcome.assessment / outcome.meta / outcome.writes
@@ -302,10 +302,10 @@ if (outcome.status === "needs_confirm") {
 
 | 选项 | 说明 |
 | --- | --- |
-| `patch` | 与 `upsertFoundation` 相同的 `FoundationPatch`。 |
-| `requireConfirmRewrite` | 默认 **true**。severity 为 `rewrite_needed` 且未 `confirmRewrite` → `{ status: "needs_confirm" }`，**不写盘**。 |
-| `confirmRewrite` | 宿主确认接受需要改写的补丁。 |
-| `rewriteChapters` | 默认 **false**。为 true 时对建议（或 `chapters` 覆盖）终稿顺序 `chapter.write`（`rewrite` 或 `polish`）。 |
+| `patch` | 与 `upsertFoundation` 相同的 `FoundationPatch`。提供的 `characters` / `worldRules` / `outline` / `layeredOutline` 数组会整文件替换。 |
+| `requireConfirmRewrite` | 默认 **true**。severity 为 `rewrite_needed` 且未 `confirmRewrite` → `{ status: "needs_confirm" }`，**不写盘**。已传 `confirmRewrite: true` 时不会再返回 `needs_confirm`。 |
+| `confirmRewrite` | 宿主确认接受需要改写的补丁。只放在 `needs_confirm` 之后的重试上。 |
+| `rewriteChapters` | 默认 **false**。为 true 时对建议（或 `chapters` 覆盖）终稿顺序 `chapter.write`（`rewrite` 或 `polish`）。`suggestedMode` 为 `"none"` 时无操作，除非宿主再传 `mode`。 |
 | `mode` | 可选覆盖 `suggestedMode`（`rewrite` \| `polish`）。 |
 | `refineWithLlm` | 转给 S5。 |
 

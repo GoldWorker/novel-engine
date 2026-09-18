@@ -382,9 +382,9 @@ const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "……
 await session.upsertFoundation({
   book: { title: "无主的信", synopsis: "……" },
   premise: "……",
-  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }],
-  characters: [{ name: "林守" }],
-  worldRules: [{ name: "信与潮", description: "……" }],
+  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }], // whole-file replace
+  characters: [{ name: "林守" }], // whole-file replace; omitted names are deleted
+  worldRules: [{ name: "信与潮", description: "……" }], // whole-file replace
 });
 
 await session.generateFoundation({
@@ -407,7 +407,9 @@ Fingerprint file changes invalidate `foundation_audit`. Mid/long can supply `lay
 
 #### 7.2a–7.2e Mid-story foundation change (assess → apply)
 
-The host UI should **assess first**, then decide whether to apply, confirm a rewrite, and (separately) opt in to chapter sync. Heuristics are deterministic (`meta_only` / `forward_only` / `rewrite_needed`). Optional `refineWithLlm` uses JSON in `complete().text` (`MockLlm` in tests). Sketch: [`examples/session-workspace.ts`](examples/session-workspace.ts). Same calls over a Worker: [8.1](#scenario-session-worker-impact).
+The host UI should **assess a proposed patch first** (`assessFoundationImpact(patch)` vs the current store), then decide whether to apply, confirm a rewrite, and (separately) opt in to chapter sync. Do **not** upsert first — a second assess of the same content then looks like “no change.” Heuristics are deterministic (`meta_only` / `forward_only` / `rewrite_needed`). Optional `refineWithLlm` uses JSON in `complete().text` (`MockLlm` in tests). Sketch: [`examples/session-workspace.ts`](examples/session-workspace.ts). Same calls over a Worker: [8.1](#scenario-session-worker-impact).
+
+**Patch shape:** omitted keys are left unchanged. A provided `characters`, `worldRules`, `outline`, or `layeredOutline` array **replaces the whole file** — omitted names/chapters are deleted, not merged or renamed in place. `{ characters: [{ name: "林深" }] }` removes 林守. `book` / `premise` likewise replace those artifacts when present.
 
 | Job | Severity you typically see | Writes chapters? |
 | --- | --- | --- |
@@ -421,10 +423,11 @@ The host UI should **assess first**, then decide whether to apply, confirm a rew
 
 #### 7.2a Assess only (no write)
 
-Call `assessFoundationImpact` **before** changing foundation. Read `severity` / `suggestedChapters` / `suggestedMode` / `reasons` and decide in the host UI. This call is pure: the store and chapter finals stay unchanged.
+Call `assessFoundationImpact(patch)` on a **proposed** patch **before** `applyFoundationChange` / `upsertFoundation`. Read `severity` / `suggestedChapters` / `suggestedMode` / `reasons` and decide in the host UI. This call is pure: the store and chapter finals stay unchanged. If that patch was already written, a second assess typically reports no change.
 
 ```ts
 const patch = {
+  // whole-file replace: 林守 is deleted, not renamed in place
   characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
 };
 
@@ -470,7 +473,7 @@ const outcome = await session.applyFoundationChange({
 // written chapter finals are unchanged; foundation.book.title is the new title
 ```
 
-`confirmRewrite` is not required for `meta_only`.
+`confirmRewrite` is not required for `meta_only`. `rewriteChapters: true` also does nothing here unless you pass `mode: "rewrite" | "polish"` — `suggestedMode` is `"none"`.
 
 <a id="scenario-session-impact-forward"></a>
 
@@ -480,12 +483,14 @@ Changes that mainly affect **unwritten** future chapters assess as `forward_only
 
 ```ts
 const patch = {
+  // whole-file replace: keep written-chapter rows, then append the future chapter
   outline: [
     { chapter: 1, title: "风暴之后", summary: "林守在礁石缝里捡到那封信。" },
     { chapter: 2, title: "岸边的地址", summary: "按地址找到一座空屋。" },
     { chapter: 3, title: "回信", summary: "把守夜写进回信，放回海里。" },
     { chapter: 4, title: "灯塔之外", summary: "尚未写下的后续。" },
   ],
+  // whole-file replace: keep 林守 when adding 潮
   characters: [
     { name: "林守", role: "主角" },
     { name: "潮", role: "未出场", bio: "只在后续出现。" },
@@ -504,7 +509,7 @@ const outcome = await session.applyFoundationChange({
 // outcome.status === "applied" — outline/characters updated; chapters/01.md unchanged
 ```
 
-Keep existing written-chapter outline rows intact so heuristics stay `forward_only`. Changing a **written** chapter's plot in the outline is [7.2d](#scenario-session-impact-confirm) instead.
+Keep existing written-chapter outline rows intact so heuristics stay `forward_only`. Changing a **written** chapter's plot in the outline is [7.2d](#scenario-session-impact-confirm) instead. Same `rewriteChapters` pitfall as [7.2b](#scenario-session-impact-meta): `suggestedMode === "none"` writes no chapters unless the host also passes `mode`.
 
 <a id="scenario-session-impact-confirm"></a>
 
@@ -515,23 +520,23 @@ Character / world / past-plot contradictions with written finals assess as `rewr
 ```ts
 const patch = {
   premise: "林深从未离开灯塔。",
+  // whole-file replace: 林守 is removed from characters.json
   characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
 };
 
-const gated = await session.applyFoundationChange({ patch });
-if (gated.status === "needs_confirm") {
-  // gated.assessment.severity === "rewrite_needed"
-  // gated.assessment.suggestedChapters — e.g. [1, 2]
-  // gated.assessment.suggestedMode === "rewrite"
-  // show gated.assessment.reasons in the UI — store is still unchanged
+let outcome = await session.applyFoundationChange({ patch });
+if (outcome.status === "needs_confirm") {
+  // outcome.assessment.severity === "rewrite_needed"
+  // outcome.assessment.suggestedChapters — e.g. [1, 2]
+  // outcome.assessment.suggestedMode === "rewrite"
+  // show outcome.assessment.reasons in the UI — store is still unchanged
+  outcome = await session.applyFoundationChange({
+    patch,
+    confirmRewrite: true,    // host acknowledged the blast radius
+    rewriteChapters: false,  // still no auto chapter rewrite (see 7.2e)
+  });
 }
-
-const applied = await session.applyFoundationChange({
-  patch,
-  confirmRewrite: true,    // host acknowledged the blast radius
-  rewriteChapters: false,  // still no auto chapter rewrite (see 7.2e)
-});
-// applied.status === "applied"
+// outcome.status === "applied"
 // foundation updated; chapter finals still the pre-change text
 ```
 
@@ -541,7 +546,7 @@ Skipping the gate (`requireConfirmRewrite: false`) is an escape hatch for tests/
 
 #### 7.2e Batch chapter sync (`rewriteChapters: true`)
 
-After confirm, chapters **still** do not rewrite unless the host opts in with `rewriteChapters: true`. Session then sequentially `chapter.write`s `suggestedChapters` (`rewrite` or `polish`). Requires `llm` (MockLlm `toolCalls`, same as [7.3](#scenario-session-chapter)).
+After confirm, chapters **still** do not rewrite unless the host opts in with `rewriteChapters: true` on the **confirmed** retry. Session then sequentially `chapter.write`s `suggestedChapters` (`rewrite` or `polish`). Requires `llm` (MockLlm `toolCalls`, same as [7.3](#scenario-session-chapter)). `rewriteChapters: true` with `suggestedMode === "none"` (typical `meta_only` / `forward_only`) writes no chapters unless the host also passes `mode: "rewrite" | "polish"`.
 
 ```ts
 import { MemoryStore, MockLlm } from "novel-engine";
@@ -560,13 +565,17 @@ const llm = new MockLlm([
 ]);
 
 const session = await createNovelSession({ store, llm, bookId: "letter" });
+const patch = { characters: [{ name: "林深", role: "主角" }] }; // replaces the whole table
 
-const outcome = await session.applyFoundationChange({
-  patch: { characters: [{ name: "林深", role: "主角" }] },
-  confirmRewrite: true,
-  rewriteChapters: true, // host opt-in — never the default
-  instruction: "按新设定对齐本章",
-});
+let outcome = await session.applyFoundationChange({ patch });
+if (outcome.status === "needs_confirm") {
+  outcome = await session.applyFoundationChange({
+    patch,
+    confirmRewrite: true,
+    rewriteChapters: true, // host opt-in — never the default; only on the confirmed retry
+    instruction: "按新设定对齐本章",
+  });
+}
 // outcome.status === "applied"
 // outcome.writes.map((row) => row.chapter)  // sequential suggestedChapters
 // outcome.writes.every((row) => row.mode === "rewrite")
@@ -665,13 +674,17 @@ Chapter numbers start at **1**. Returns `null` only when all four fields are abs
 
 ```ts
 const progress = await session.getProgress();
-const n = latestCompleted(progress!); // max completed chapter; 0 if none
-const latest = n > 0 ? await session.chapter.get(n) : null;
-const next = nextChapter(progress!);  // n + 1
+if (progress == null) {
+  // no meta/progress.json yet
+} else {
+  const n = latestCompleted(progress); // max completed chapter; 0 if none
+  const latest = n > 0 ? await session.chapter.get(n) : null;
+  const next = nextChapter(progress);  // n + 1
 
-// In progress (may only have a draft):
-const current = progress?.currentChapter;
-const inProgress = current ? await session.chapter.get(current) : null;
+  // In progress (may only have a draft):
+  const current = progress.currentChapter;
+  const inProgress = current ? await session.chapter.get(current) : null;
+}
 ```
 
 <a id="scenario-session-workspace"></a>
@@ -730,24 +743,23 @@ await session.chapter.write({ chapter: 1, mode: "create" });
 
 #### 8.1 Assess + apply over the Worker bridge
 
-Same [7.2a–7.2e](#scenario-session-impact) flows: the client is still a `NovelSession`. Additive protocol commands (`SESSION_PROTOCOL === 1`): `assessFoundationImpact` / `applyFoundationChange`. Confirm gate and `rewriteChapters` default **false** are enforced in the worker.
+Same [7.2a–7.2e](#scenario-session-impact) flows: the client is still a `NovelSession`. Additive protocol commands (`SESSION_PROTOCOL === 1`): `assessFoundationImpact` / `applyFoundationChange`. Confirm gate and `rewriteChapters` default **false** are enforced in the worker. Prefer the two-step apply for `rewrite_needed` — do **not** pass `confirmRewrite: true` and then expect `needs_confirm`.
 
 ```ts
-const patch = { characters: [{ name: "林深", role: "主角" }] };
+const patch = { characters: [{ name: "林深", role: "主角" }] }; // whole-file replace
 
 const assessment = await session.assessFoundationImpact(patch);
 // assessment.severity / suggestedChapters / suggestedMode / reasons — UI thread, no write
 
-if (assessment.severity === "rewrite_needed") {
-  const gated = await session.applyFoundationChange({ patch });
-  // gated.status === "needs_confirm" until the host retries:
+let outcome = await session.applyFoundationChange({ patch });
+if (outcome.status === "needs_confirm") {
+  // show outcome.assessment.reasons — store unchanged
+  outcome = await session.applyFoundationChange({
+    patch,
+    confirmRewrite: true,
+    rewriteChapters: false, // host opt-in on the worker too; never auto-rewrite
+  });
 }
-
-const outcome = await session.applyFoundationChange({
-  patch,
-  confirmRewrite: assessment.severity === "rewrite_needed",
-  rewriteChapters: false, // host opt-in on the worker too; never auto-rewrite
-});
 ```
 
 Busy (`SessionBusyError`) is the worker-side session flag: an in-flight `applyFoundationChange` blocks `chapter.write` across the bridge.

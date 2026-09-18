@@ -382,9 +382,9 @@ const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "……
 await session.upsertFoundation({
   book: { title: "无主的信", synopsis: "……" },
   premise: "……",
-  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }],
-  characters: [{ name: "林守" }],
-  worldRules: [{ name: "信与潮", description: "……" }],
+  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }], // 整文件替换
+  characters: [{ name: "林守" }], // 整表替换；未出现的名字会被删除
+  worldRules: [{ name: "信与潮", description: "……" }], // 整文件替换
 });
 
 await session.generateFoundation({
@@ -407,7 +407,9 @@ await session.startAutoWrite({
 
 #### 7.2a–7.2e 中途改基础设定（先评估再应用）
 
-宿主 UI 应**先评估**，再决定是否 apply、是否确认改写，以及（另一步）是否同步章节。启发式是确定性的（`meta_only` / `forward_only` / `rewrite_needed`）。可选 `refineWithLlm` 使用 `complete().text` 里的 JSON（测试用 `MockLlm`）。示意：[`examples/session-workspace.ts`](examples/session-workspace.ts)。Worker 上的同样调用见 [8.1](#scenario-session-worker-impact)。
+宿主 UI 应**先评估拟议补丁**（`assessFoundationImpact(patch)`，对照当前 store），再决定是否 apply、是否确认改写，以及（另一步）是否同步章节。**不要**先 upsert——同一内容再评估一次会看起来像「没有变更」。启发式是确定性的（`meta_only` / `forward_only` / `rewrite_needed`）。可选 `refineWithLlm` 使用 `complete().text` 里的 JSON（测试用 `MockLlm`）。示意：[`examples/session-workspace.ts`](examples/session-workspace.ts)。Worker 上的同样调用见 [8.1](#scenario-session-worker-impact)。
+
+**补丁形状：** 省略的键保持原样。一旦提供 `characters`、`worldRules`、`outline` 或 `layeredOutline` 数组，就是**整文件替换**——未出现的名字/章节会被删除，不是合并，也不是就地改名。`{ characters: [{ name: "林深" }] }` 会去掉林守。提供 `book` / `premise` 时同样整份替换对应产物。
 
 | 任务 | 常见严重度 | 会改写章节吗？ |
 | --- | --- | --- |
@@ -421,10 +423,11 @@ await session.startAutoWrite({
 
 #### 7.2a 只评估（不写盘）
 
-改设定**之前**调用 `assessFoundationImpact`。读取 `severity` / `suggestedChapters` / `suggestedMode` / `reasons`，在宿主 UI 里做决定。该调用是纯评估：store 与章节终稿都不变。
+对**拟议**补丁调用 `assessFoundationImpact(patch)`，且必须在 `applyFoundationChange` / `upsertFoundation` **之前**。读取 `severity` / `suggestedChapters` / `suggestedMode` / `reasons`，在宿主 UI 里做决定。该调用是纯评估：store 与章节终稿都不变。若该补丁已经写入，再评估一次通常会显示没有变更。
 
 ```ts
 const patch = {
+  // 整表替换：林守会被删除，不是就地改名
   characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
 };
 
@@ -470,7 +473,7 @@ const outcome = await session.applyFoundationChange({
 // 已写章节终稿不变；foundation.book.title 已是新标题
 ```
 
-`meta_only` 不需要 `confirmRewrite`。
+`meta_only` 不需要 `confirmRewrite`。这里即使传 `rewriteChapters: true` 也不会写章，除非再传 `mode: "rewrite" | "polish"`——因为 `suggestedMode` 是 `"none"`。
 
 <a id="scenario-session-impact-forward"></a>
 
@@ -480,12 +483,14 @@ const outcome = await session.applyFoundationChange({
 
 ```ts
 const patch = {
+  // 整文件替换：保留已写章节行，再追加后续章
   outline: [
     { chapter: 1, title: "风暴之后", summary: "林守在礁石缝里捡到那封信。" },
     { chapter: 2, title: "岸边的地址", summary: "按地址找到一座空屋。" },
     { chapter: 3, title: "回信", summary: "把守夜写进回信，放回海里。" },
     { chapter: 4, title: "灯塔之外", summary: "尚未写下的后续。" },
   ],
+  // 整表替换：加「潮」时必须仍带上林守
   characters: [
     { name: "林守", role: "主角" },
     { name: "潮", role: "未出场", bio: "只在后续出现。" },
@@ -504,7 +509,7 @@ const outcome = await session.applyFoundationChange({
 // outcome.status === "applied" — 大纲/角色已更新；chapters/01.md 不变
 ```
 
-已写章节的大纲行请保持原样，启发式才会停在 `forward_only`。改**已写**章的情节属于 [7.2d](#scenario-session-impact-confirm)。
+已写章节的大纲行请保持原样，启发式才会停在 `forward_only`。改**已写**章的情节属于 [7.2d](#scenario-session-impact-confirm)。与 [7.2b](#scenario-session-impact-meta) 相同：`suggestedMode === "none"` 时，除非宿主再传 `mode`，否则 `rewriteChapters: true` 也不会写章。
 
 <a id="scenario-session-impact-confirm"></a>
 
@@ -515,23 +520,23 @@ const outcome = await session.applyFoundationChange({
 ```ts
 const patch = {
   premise: "林深从未离开灯塔。",
+  // 整表替换：characters.json 里的林守会被删掉
   characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
 };
 
-const gated = await session.applyFoundationChange({ patch });
-if (gated.status === "needs_confirm") {
-  // gated.assessment.severity === "rewrite_needed"
-  // gated.assessment.suggestedChapters — 如 [1, 2]
-  // gated.assessment.suggestedMode === "rewrite"
-  // 用 gated.assessment.reasons 提示 UI — store 仍未改
+let outcome = await session.applyFoundationChange({ patch });
+if (outcome.status === "needs_confirm") {
+  // outcome.assessment.severity === "rewrite_needed"
+  // outcome.assessment.suggestedChapters — 如 [1, 2]
+  // outcome.assessment.suggestedMode === "rewrite"
+  // 用 outcome.assessment.reasons 提示 UI — store 仍未改
+  outcome = await session.applyFoundationChange({
+    patch,
+    confirmRewrite: true,    // 宿主已确认影响范围
+    rewriteChapters: false,  // 仍然不会自动改写章节（见 7.2e）
+  });
 }
-
-const applied = await session.applyFoundationChange({
-  patch,
-  confirmRewrite: true,    // 宿主已确认影响范围
-  rewriteChapters: false,  // 仍然不会自动改写章节（见 7.2e）
-});
-// applied.status === "applied"
+// outcome.status === "applied"
 // 设定已更新；章节终稿仍是改设定前的文本
 ```
 
@@ -541,7 +546,7 @@ const applied = await session.applyFoundationChange({
 
 #### 7.2e 批量同步章节（`rewriteChapters: true`）
 
-确认之后，章节**仍然**不会改写，除非宿主显式传入 `rewriteChapters: true`。Session 随后按 `suggestedChapters` 顺序调用 `chapter.write`（`rewrite` 或 `polish`）。需要 `llm`（MockLlm 的 `toolCalls`，与 [7.3](#scenario-session-chapter) 相同）。
+确认之后，章节**仍然**不会改写，除非宿主在**已确认的重试**上显式传入 `rewriteChapters: true`。Session 随后按 `suggestedChapters` 顺序调用 `chapter.write`（`rewrite` 或 `polish`）。需要 `llm`（MockLlm 的 `toolCalls`，与 [7.3](#scenario-session-chapter) 相同）。`rewriteChapters: true` 且 `suggestedMode === "none"`（常见于 `meta_only` / `forward_only`）时不会写章，除非宿主再传 `mode: "rewrite" | "polish"`。
 
 ```ts
 import { MemoryStore, MockLlm } from "novel-engine";
@@ -560,13 +565,17 @@ const llm = new MockLlm([
 ]);
 
 const session = await createNovelSession({ store, llm, bookId: "letter" });
+const patch = { characters: [{ name: "林深", role: "主角" }] }; // 整表替换
 
-const outcome = await session.applyFoundationChange({
-  patch: { characters: [{ name: "林深", role: "主角" }] },
-  confirmRewrite: true,
-  rewriteChapters: true, // 宿主显式选择——绝不是默认
-  instruction: "按新设定对齐本章",
-});
+let outcome = await session.applyFoundationChange({ patch });
+if (outcome.status === "needs_confirm") {
+  outcome = await session.applyFoundationChange({
+    patch,
+    confirmRewrite: true,
+    rewriteChapters: true, // 宿主显式选择——绝不是默认；只放在确认后的重试上
+    instruction: "按新设定对齐本章",
+  });
+}
 // outcome.status === "applied"
 // outcome.writes.map((row) => row.chapter)  // 顺序即 suggestedChapters
 // outcome.writes.every((row) => row.mode === "rewrite")
@@ -665,13 +674,17 @@ if (view == null) {
 
 ```ts
 const progress = await session.getProgress();
-const n = latestCompleted(progress!); // 已完成章号最大值；没有则为 0
-const latest = n > 0 ? await session.chapter.get(n) : null;
-const next = nextChapter(progress!);  // n + 1
+if (progress == null) {
+  // 还没有 meta/progress.json
+} else {
+  const n = latestCompleted(progress); // 已完成章号最大值；没有则为 0
+  const latest = n > 0 ? await session.chapter.get(n) : null;
+  const next = nextChapter(progress);  // n + 1
 
-// 正在写、可能只有草稿：
-const current = progress?.currentChapter;
-const inProgress = current ? await session.chapter.get(current) : null;
+  // 正在写、可能只有草稿：
+  const current = progress.currentChapter;
+  const inProgress = current ? await session.chapter.get(current) : null;
+}
 ```
 
 <a id="scenario-session-workspace"></a>
@@ -730,24 +743,23 @@ await session.chapter.write({ chapter: 1, mode: "create" });
 
 #### 8.1 跨 Worker 桥评估 + 应用
 
-与 [7.2a–7.2e](#scenario-session-impact) 相同：client 仍是 `NovelSession`。增量协议命令（`SESSION_PROTOCOL === 1`）：`assessFoundationImpact` / `applyFoundationChange`。确认闸门与 `rewriteChapters` 默认 **false** 在 Worker 里执行。
+与 [7.2a–7.2e](#scenario-session-impact) 相同：client 仍是 `NovelSession`。增量协议命令（`SESSION_PROTOCOL === 1`）：`assessFoundationImpact` / `applyFoundationChange`。确认闸门与 `rewriteChapters` 默认 **false** 在 Worker 里执行。`rewrite_needed` 请用两步 apply——**不要**先带 `confirmRewrite: true` 再指望看到 `needs_confirm`。
 
 ```ts
-const patch = { characters: [{ name: "林深", role: "主角" }] };
+const patch = { characters: [{ name: "林深", role: "主角" }] }; // 整表替换
 
 const assessment = await session.assessFoundationImpact(patch);
 // assessment.severity / suggestedChapters / suggestedMode / reasons — UI 线程，不写盘
 
-if (assessment.severity === "rewrite_needed") {
-  const gated = await session.applyFoundationChange({ patch });
-  // gated.status === "needs_confirm"，直到宿主带确认重试
+let outcome = await session.applyFoundationChange({ patch });
+if (outcome.status === "needs_confirm") {
+  // 展示 outcome.assessment.reasons — store 未改
+  outcome = await session.applyFoundationChange({
+    patch,
+    confirmRewrite: true,
+    rewriteChapters: false, // Worker 上同样要宿主显式选择；绝不自动改写
+  });
 }
-
-const outcome = await session.applyFoundationChange({
-  patch,
-  confirmRewrite: assessment.severity === "rewrite_needed",
-  rewriteChapters: false, // Worker 上同样要宿主显式选择；绝不自动改写
-});
 ```
 
 Busy（`SessionBusyError`）是 Worker 侧 session 标志：进行中的 `applyFoundationChange` 会挡住跨桥的 `chapter.write`。

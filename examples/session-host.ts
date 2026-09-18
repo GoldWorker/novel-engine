@@ -41,21 +41,23 @@ export async function demoSessionHost(): Promise<void> {
   session.close();
 }
 
-/** 8.1 — same assess → confirm → apply flow over createSessionClient. */
+/** 8.1 — two-step applyFoundationChange confirm gate over createSessionClient. */
 export async function demoAssessApplyOnWorker(): Promise<void> {
   const { session } = connectSession(new URL("./session.worker.ts", import.meta.url));
-  const patch = { characters: [{ name: "林深", role: "主角" }] };
+  const patch = { characters: [{ name: "林深", role: "主角" }] }; // whole-file replace
   const assessment = await session.assessFoundationImpact(patch);
-  if (assessment.severity === "rewrite_needed") {
-    const gated = await session.applyFoundationChange({ patch });
-    console.log(gated.status, assessment.suggestedChapters);
+  // assessment.severity / suggestedChapters / suggestedMode / reasons — UI thread, no write
+
+  let outcome = await session.applyFoundationChange({ patch });
+  if (outcome.status === "needs_confirm") {
+    // show outcome.assessment.reasons — store unchanged
+    outcome = await session.applyFoundationChange({
+      patch,
+      confirmRewrite: true,
+      rewriteChapters: false, // host opt-in on the worker too; never auto-rewrite
+    });
   }
-  const applied = await session.applyFoundationChange({
-    patch,
-    confirmRewrite: assessment.severity === "rewrite_needed",
-    rewriteChapters: false,
-  });
-  console.log(applied.status, SESSION_PROTOCOL);
+  console.log(assessment.severity, outcome.status, SESSION_PROTOCOL);
   session.close();
 }
 

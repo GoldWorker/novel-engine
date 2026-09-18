@@ -109,6 +109,7 @@ async function seedMidStorySession(store = new MemoryStore()) {
 export async function assessFoundationImpactOnly() {
   const { session } = await seedMidStorySession();
   const patch = {
+    // whole-file replace: 林守 is deleted, not renamed in place
     characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
   };
   const assessment = await session.assessFoundationImpact(patch);
@@ -125,7 +126,7 @@ export async function applyMetaOnlyFoundationChange() {
   const assessment = await session.assessFoundationImpact(patch);
   const outcome = await session.applyFoundationChange({
     patch,
-    rewriteChapters: false,
+    rewriteChapters: false, // suggestedMode is "none"; rewriteChapters: true is a no-op unless mode is passed
   });
   return { assessment, outcome };
 }
@@ -134,10 +135,12 @@ export async function applyMetaOnlyFoundationChange() {
 export async function applyForwardOnlyFoundationChange() {
   const { session } = await seedMidStorySession();
   const patch = {
+    // whole-file replace: keep written-chapter rows, then append the future chapter
     outline: [
       ...SHORT_FOUNDATION.outline,
       { chapter: 4, title: "灯塔之外", summary: "尚未写下的后续。" },
     ],
+    // whole-file replace: keep 林守 when adding 潮
     characters: [
       ...SHORT_FOUNDATION.characters,
       { name: "潮", role: "未出场", bio: "只在后续出现。" },
@@ -146,7 +149,7 @@ export async function applyForwardOnlyFoundationChange() {
   const assessment = await session.assessFoundationImpact(patch);
   const outcome = await session.applyFoundationChange({
     patch,
-    rewriteChapters: false,
+    rewriteChapters: false, // suggestedMode is "none"; rewriteChapters: true is a no-op unless mode is passed
   });
   return { assessment, outcome };
 }
@@ -156,18 +159,19 @@ export async function applyFoundationChangeConfirmGate() {
   const { session } = await seedMidStorySession();
   const patch = {
     premise: "林深从未离开灯塔。",
+    // whole-file replace: 林守 is removed from characters.json
     characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
   };
-  const gated = await session.applyFoundationChange({ patch });
-  const applied =
-    gated.status === "needs_confirm"
-      ? await session.applyFoundationChange({
-          patch,
-          confirmRewrite: true,
-          rewriteChapters: false,
-        })
-      : gated;
-  return { gated, applied };
+  let outcome = await session.applyFoundationChange({ patch });
+  if (outcome.status === "needs_confirm") {
+    // show outcome.assessment.reasons in UI — store unchanged
+    outcome = await session.applyFoundationChange({
+      patch,
+      confirmRewrite: true,
+      rewriteChapters: false,
+    });
+  }
+  return outcome;
 }
 
 /** 7.2e — after confirm, host opts in to sequential chapter.write. */
@@ -224,12 +228,17 @@ export async function applyFoundationChangeBatchRewrite() {
   const seeded = await seedMidStorySession(store);
   seeded.session.close();
   const session = await createNovelSession({ store, llm, bookId: "letter" });
-  return session.applyFoundationChange({
-    patch: { characters: [{ name: "林深", role: "主角" }] },
-    confirmRewrite: true,
-    rewriteChapters: true,
-    instruction: "按新设定对齐本章",
-  });
+  const patch = { characters: [{ name: "林深", role: "主角" }] }; // whole-file replace
+  let outcome = await session.applyFoundationChange({ patch });
+  if (outcome.status === "needs_confirm") {
+    outcome = await session.applyFoundationChange({
+      patch,
+      confirmRewrite: true,
+      rewriteChapters: true, // host opt-in — never the default; only on the confirmed retry
+      instruction: "按新设定对齐本章",
+    });
+  }
+  return outcome;
 }
 
 export async function twoBookWorkspace() {

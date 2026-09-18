@@ -66,7 +66,7 @@ await session.assertReadyToWrite();
 | `assertReadyToWrite({ prompt? })` | Throws `FoundationIncompleteError` with `gaps` when not ready. |
 | `listArtifacts(prefix?)` | `listStorePaths`. |
 | `exportSnapshot()` / `importSnapshot(bytes)` | Thin wrappers around the existing book-snapshot APIs. |
-| `upsertFoundation(patch)` | Partial write of `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules`. Invalidates `meta/foundation_audit.json` when fingerprint files change. |
+| `upsertFoundation(patch)` | Partial write of `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules` (omitted keys unchanged; provided arrays replace the whole file). Invalidates `meta/foundation_audit.json` when fingerprint files change. |
 | `generateFoundation({ prompt, keys, mode? })` | Structured one-shot `LlmPort.complete`; parse JSON from `text`; `upsertFoundation`. **Not** an Engine loop. |
 | `assessFoundationImpact(patch, { refineWithLlm? })` | S5: rules-first impact of a **proposed** patch. Optional LLM JSON refine. **Does not mutate**. |
 | `applyFoundationChange({ patch, confirmRewrite?, rewriteChapters?, … })` | S6: assess → confirm gate → upsert → optional sequential `chapter.write`. |
@@ -102,13 +102,13 @@ For mid/long, a missing outline gap points at `layered_outline.json` and explain
 await session.upsertFoundation({
   book: { title: "无主的信", synopsis: "……" },
   premise: "……",
-  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }],
-  characters: [{ name: "林守" }],
-  worldRules: [{ name: "信与潮", description: "……" }],
+  outline: [{ chapter: 1, title: "风暴之后", summary: "……" }], // whole-file replace
+  characters: [{ name: "林守" }], // whole-file replace; omitted names are deleted
+  worldRules: [{ name: "信与潮", description: "……" }], // whole-file replace
 });
 ```
 
-Light shape checks, then `writeJson` / `writeText` on existing `PATHS`. Any write to fingerprint files (`book`, `premise`, `outline`, `characters`, `world_rules`, `layered_outline`) **invalidates** `meta/foundation_audit.json` (`StorePort.remove` when implemented; otherwise a cleared audit record). Returns a fresh `getFoundation()`.
+Light shape checks, then `writeJson` / `writeText` on existing `PATHS`. **Omitted patch keys stay unchanged.** A provided `characters`, `worldRules`, `outline`, or `layeredOutline` array **replaces the whole file** (omitted names/chapters are deleted, not merged or renamed). `book` / `premise` replace those artifacts when present. Any write to fingerprint files (`book`, `premise`, `outline`, `characters`, `world_rules`, `layered_outline`) **invalidates** `meta/foundation_audit.json` (`StorePort.remove` when implemented; otherwise a cleared audit record). Returns a fresh `getFoundation()`.
 
 ### `generateFoundation({ prompt, keys, mode? })`
 
@@ -258,12 +258,12 @@ Sketch: [`examples/session.worker.ts`](../examples/session.worker.ts) + [`exampl
 
 ## S5 — `assessFoundationImpact`
 
-Before rewriting chapters after a foundation change, ask the session how wide the blast radius is. **Rules-first** heuristics are deterministic (MemoryStore tests, no LLM). When `refineWithLlm: true` and an `LlmPort` is present, a structured one-shot JSON completion may refine the result — it **cannot downgrade** heuristic `severity`. Real providers are never required (`MockLlm` in tests).
+Call this on a **proposed** `FoundationPatch` against the current store, **before** `applyFoundationChange` / `upsertFoundation` (and before any chapter rewrite). Do not assess after the same patch is already written — a second call then typically looks like “no change.” **Rules-first** heuristics are deterministic (MemoryStore tests, no LLM). When `refineWithLlm: true` and an `LlmPort` is present, a structured one-shot JSON completion may refine the result — it **cannot downgrade** heuristic `severity`. Real providers are never required (`MockLlm` in tests).
 
 ```ts
 const assessment = await session.assessFoundationImpact({
   book: { title: "无主的信（修订）", synopsis: "……" },
-  characters: [{ name: "林深", role: "主角" }],
+  characters: [{ name: "林深", role: "主角" }], // whole-file replace; 林守 is removed
 });
 // assessment.severity: "meta_only" | "forward_only" | "rewrite_needed"
 ```
@@ -278,23 +278,23 @@ const assessment = await session.assessFoundationImpact({
 | `changedKeys` | Foundation keys whose content actually differs. |
 | `source` | `"heuristics"` or `"llm"`. |
 
-Heuristics look at `meta/*`, `premise.md`, `outline.json`, `layered_outline.json`, `characters.json`, `world_rules.json`, plus written `chapters/` (and mention `drafts/` in notes). Mid-story foundation upsert/generate remains allowed anytime; this API only **assesses**. It **must not** mutate the store or rewrite chapters.
+Heuristics look at `meta/*`, `premise.md`, `outline.json`, `layered_outline.json`, `characters.json`, `world_rules.json`, plus written `chapters/` (and mention `drafts/` in notes). Mid-story foundation upsert/generate remains allowed anytime; this API only **assesses a proposal**. It **must not** mutate the store or rewrite chapters. Host order: `assess(patch)` → optional UI → `applyFoundationChange({ patch, … })`.
 
 ## S6 — `applyFoundationChange`
 
 Orchestrates: assess → confirm gate for `rewrite_needed` → `upsertFoundation` → optional sequential `chapter.write` for `suggestedChapters`. Reuses S2/S3 APIs. Chapters **do not auto-rewrite** — the host must pass `rewriteChapters: true`.
 
 ```ts
-const outcome = await session.applyFoundationChange({
-  patch: { premise: "……", characters: [{ name: "林深" }] },
-  confirmRewrite: true,     // required when severity is rewrite_needed (default gate)
-  rewriteChapters: true,    // host opt-in; default false
-  instruction: "按新设定对齐本章",
+let outcome = await session.applyFoundationChange({
+  patch: { premise: "……", characters: [{ name: "林深" }] }, // whole-file replace
 });
-
 if (outcome.status === "needs_confirm") {
-  // show outcome.assessment.reasons in the UI, then retry with confirmRewrite: true
-  return;
+  // show outcome.assessment.reasons in the UI — store unchanged
+  outcome = await session.applyFoundationChange({
+    patch: { premise: "……", characters: [{ name: "林深" }] },
+    confirmRewrite: true,
+    // rewriteChapters: true only when the host opts in to sync chapters
+  });
 }
 // outcome.status === "applied"
 // outcome.assessment / outcome.meta / outcome.writes
@@ -302,10 +302,10 @@ if (outcome.status === "needs_confirm") {
 
 | Option | Notes |
 | --- | --- |
-| `patch` | Same `FoundationPatch` as `upsertFoundation`. |
-| `requireConfirmRewrite` | Default **true**. When severity is `rewrite_needed` and `confirmRewrite` is not true → `{ status: "needs_confirm" }` with **no writes**. |
-| `confirmRewrite` | Host acknowledgement of a rewrite-needed patch. |
-| `rewriteChapters` | Default **false**. When true, sequential `chapter.write` (`rewrite` or `polish`) for suggested (or `chapters` override) finals. |
+| `patch` | Same `FoundationPatch` as `upsertFoundation`. Provided `characters` / `worldRules` / `outline` / `layeredOutline` arrays replace the whole file. |
+| `requireConfirmRewrite` | Default **true**. When severity is `rewrite_needed` and `confirmRewrite` is not true → `{ status: "needs_confirm" }` with **no writes**. Passing `confirmRewrite: true` never returns `needs_confirm`. |
+| `confirmRewrite` | Host acknowledgement of a rewrite-needed patch. Only on the retry after `needs_confirm`. |
+| `rewriteChapters` | Default **false**. When true, sequential `chapter.write` (`rewrite` or `polish`) for suggested (or `chapters` override) finals. No-op when `suggestedMode` is `"none"` unless the host also passes `mode`. |
 | `mode` | Optional override of `suggestedMode` (`rewrite` \| `polish`). |
 | `refineWithLlm` | Forwarded to S5. |
 
