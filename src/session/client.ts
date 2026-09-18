@@ -28,9 +28,11 @@ import type {
   InspectResult,
   NovelSession,
   SessionEvent,
+  SessionRunState,
   SessionUnsubscribe,
   StartAutoWriteOptions,
 } from "./types.js";
+import { AbortedError, attachAbort } from "../abort.js";
 
 export interface CreateSessionClientOptions {
   /** Must match the `bookId` of the worker-side `createNovelSession`. */
@@ -128,6 +130,28 @@ export function createSessionClient(
     return { v: SESSION_PROTOCOL, ns: SESSION_NS, id: nextId() };
   }
 
+  function cancelRpc(): Promise<BookControlResult> {
+    return rpc({ ...envelope(), type: "cancel" });
+  }
+
+  async function withClientAbort<T>(
+    signal: AbortSignal | undefined,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    if (signal?.aborted) {
+      throw new AbortedError();
+    }
+    const pending = run();
+    const detach = attachAbort(signal, () => {
+      void cancelRpc();
+    });
+    try {
+      return await pending;
+    } finally {
+      detach();
+    }
+  }
+
   const chapter: ChapterRunner = {
     get(chapterNumber: number): Promise<ChapterView | null> {
       return rpc({ ...envelope(), type: "chapterGet", chapter: chapterNumber });
@@ -141,7 +165,9 @@ export function createSessionClient(
       });
     },
     write(input: ChapterWriteInput): Promise<ChapterWriteResult> {
-      return rpc({ ...envelope(), type: "chapterWrite", input });
+      return withClientAbort(input.signal, () =>
+        rpc({ ...envelope(), type: "chapterWrite", input: stripSignal(input) }),
+      );
     },
     delete(chapterNumber: number, options: ChapterDeleteOptions = {}): Promise<ChapterDeleteResult> {
       const command = { ...envelope(), type: "chapterDelete" as const, chapter: chapterNumber };
@@ -192,7 +218,9 @@ export function createSessionClient(
       return rpc({ ...envelope(), type: "upsertFoundation", patch });
     },
     generateFoundation(generateOpts: GenerateFoundationOptions): Promise<FoundationMeta> {
-      return rpc({ ...envelope(), type: "generateFoundation", options: generateOpts });
+      return withClientAbort(generateOpts.signal, () =>
+        rpc({ ...envelope(), type: "generateFoundation", options: stripSignal(generateOpts) }),
+      );
     },
     assessFoundationImpact(
       patch: FoundationPatch,
@@ -210,7 +238,9 @@ export function createSessionClient(
       return rpc({ ...envelope(), type: "applyFoundationChange", options: applyOpts });
     },
     startAutoWrite(writeOpts: StartAutoWriteOptions): Promise<AutoWriteResult> {
-      return rpc({ ...envelope(), type: "startAutoWrite", options: writeOpts });
+      return withClientAbort(writeOpts.signal, () =>
+        rpc({ ...envelope(), type: "startAutoWrite", options: stripSignal(writeOpts) }),
+      );
     },
     pause(): Promise<BookControlResult> {
       return rpc({ ...envelope(), type: "pause" });
@@ -220,6 +250,12 @@ export function createSessionClient(
     },
     steer(note: string): Promise<BookControlResult> {
       return rpc({ ...envelope(), type: "steer", note });
+    },
+    cancel(): Promise<BookControlResult> {
+      return cancelRpc();
+    },
+    getRunState(): Promise<SessionRunState> {
+      return rpc({ ...envelope(), type: "getRunState" });
     },
     subscribe(listener: (event: SessionEvent) => void): SessionUnsubscribe {
       if (closed) {
@@ -260,4 +296,9 @@ export function createSessionClient(
   };
 
   return client;
+}
+
+function stripSignal<T extends { signal?: AbortSignal }>(value: T): Omit<T, "signal"> {
+  const { signal: _signal, ...rest } = value;
+  return rest;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createEngine,
+  AbortedError,
   EngineError,
   MemoryStore,
   MockLlm,
@@ -89,6 +90,36 @@ describe("Engine pause / resume / steer", () => {
     await expect(engine.run()).rejects.toThrow(/already running/);
     await engine.resume();
     await running;
+  });
+
+  it("cancel() aborts an in-flight run with AbortedError; idle cancel is a no-op", async () => {
+    const store = new MemoryStore();
+    await store.saveProgress({
+      phase: "init",
+      flow: "writing",
+      totalChapters: 0,
+      completedChapters: [],
+      pendingRewrites: [],
+      layered: false,
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const llm = MockLlm.fromHandler(async () => {
+      await gate;
+      return { text: "noop" };
+    });
+    const engine = createEngine({ store, llm, maxSteps: 8 });
+    engine.cancel();
+    expect(engine.isRunning).toBe(false);
+
+    const running = engine.run({ prompt: "短篇" });
+    await waitFor(() => llm.callCount > 0);
+    engine.cancel();
+    await expect(running).rejects.toBeInstanceOf(AbortedError);
+    expect(engine.isRunning).toBe(false);
+    release();
   });
 });
 

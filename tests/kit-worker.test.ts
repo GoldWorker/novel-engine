@@ -248,4 +248,52 @@ describe("kit worker init protocol", () => {
       }
     }
   });
+
+  it("kit llmEndpoint HTTP errors throw LlmError with status", async () => {
+    const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+    const g = globalThis as unknown as {
+      fetch: () => Promise<{
+        ok: boolean;
+        status: number;
+        statusText: string;
+        text(): Promise<string>;
+      }>;
+    };
+    g.fetch = async () => ({
+      ok: false,
+      status: 503,
+      statusText: "Service Unavailable",
+      async text() {
+        return "upstream down";
+      },
+    });
+
+    try {
+      const { host, worker } = createLinkedMessagePorts();
+      const attached = attachKitWorker(worker);
+      const connected = await connectKitWorker({
+        port: host,
+        bookId: "letter",
+        llmEndpoint: "/api/llm",
+        store: "memory",
+        fallbackToMemory: true,
+      });
+      await expect(
+        connected.session.generateFoundation({
+          prompt: short.prompt,
+          keys: ["premise"],
+        }),
+      ).rejects.toMatchObject({ name: "LlmError", status: 503 });
+      expect(await connected.session.getRunState()).toBe("idle");
+      expect(await connected.session.cancel()).toEqual({ status: "idle" });
+      connected.session.close();
+      attached.detach();
+    } finally {
+      if (originalFetch === undefined) {
+        delete (globalThis as { fetch?: unknown }).fetch;
+      } else {
+        (globalThis as unknown as { fetch: unknown }).fetch = originalFetch;
+      }
+    }
+  });
 });

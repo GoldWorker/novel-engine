@@ -221,6 +221,7 @@ create 时，主线程先发 **init**（`ns: "kit"`），带上 `llmEndpoint`、
 | `generateFoundation` | `generateFoundation` |
 | `startBook` | `startAutoWrite` |
 | `pauseBook` / `resumeBook` / `steerBook` | `pause` / `resume` / `steer` |
+| `cancelBook` / `getRunState` | `cancel` / `getRunState` |
 | `assessFoundation` | `assessFoundationImpact` |
 | `applyFoundation` | `applyFoundationChange` |
 | `getChapter` / `writeChapter` / `saveChapter` / `deleteChapter` | `chapter.get` / `write` / `saveFinal` / `delete` |
@@ -242,6 +243,8 @@ create 时，主线程先发 **init**（`ns: "kit"`），带上 `llmEndpoint`、
 `startBook` 在默认 `requireConfirmGaps: true` 时，可能返回 `{ status: "needs_foundation", gaps, meta, auditOnly }` 而不跑 `Engine.run`。book/premise/outline/characters/worldRules 都齐之后，剩下的缺口常常是 `foundation_audit`（`auditOnly: true`）——`generateMissing` 填不了它（由 Engine 写审查）。UI 确认后再用 **`confirmAuditGap: true`** 重试。这**不会**跳过非审查缺口（不像 `requireConfirmGaps: false`）。
 
 `startBook` 进行中时，`pauseBook` / `resumeBook` / `steerBook(message)` 转发到这次运行持有的 Engine 实例（`runtime: "worker"` 同样）。没有在跑时返回 `{ status: "idle" }`（空操作，不是异常）。它们**不**占 busy。空 steer 笔记抛 `EngineError`。`subscribe` 会从该 Engine 发出 `paused` / `resumed` / `steered`。
+
+**新增（0.7.0）：** `cancelBook()` / `startBook`、`generateFoundation`、`writeChapter` 上的可选 `signal` 会以 `AbortedError` 中止进行中的运行。空闲 cancel 为 `{ status: "idle" }`。`getRunState()` 是无副作用快照（`idle` / `generating_missing` / `running` / `paused` / `busy`）。**兼容：** 不传 `signal`、不调 `cancelBook` 即为 0.6.0 行为。
 
 `workspace: false`（或自定义 `StorePort`）时，多书方法会抛出明确的 `KitWorkspaceDisabledError`。
 
@@ -305,7 +308,7 @@ import {
 
 `createDashScopeLlm` **复用** OpenAI 形态的客户端。新加坡 / 美国等区域请传 `baseUrl`（必须包含 `/compatible-mode/v1`）。例如：`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`。
 
-Anthropic 额外选项：`maxTokens`（默认 `4096`）、`anthropicVersion`（默认 `2023-06-01`）。HTTP 失败抛 `LlmAdapterError`（`status?`、`body?`）。
+Anthropic 额外选项：`maxTokens`（默认 `4096`）、`anthropicVersion`（默认 `2023-06-01`）。HTTP 失败抛 `LlmAdapterError`（`status?`、`body?`）。**新增（0.7.0）：** `LlmAdapterError` 继承可移植的 `LlmError`（字段相同）。Kit Worker 的 `llmEndpoint` fetch 抛 `LlmError`（不再是普通 `Error`）。
 
 ### 映射
 

@@ -37,12 +37,16 @@ export async function postJson(options: {
   url: string;
   headers: Record<string, string>;
   body: unknown;
+  signal?: AbortSignal;
 }): Promise<unknown> {
   const init: FetchRequestInit = {
     method: "POST",
     headers: options.headers,
     body: JSON.stringify(options.body),
   };
+  if (options.signal !== undefined) {
+    init.signal = options.signal;
+  }
   const response = await options.fetch(options.url, init);
   const text = await response.text();
   if (!response.ok) {

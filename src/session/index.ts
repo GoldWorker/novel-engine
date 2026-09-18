@@ -48,6 +48,7 @@ export type {
   PlanningInfo,
   PlanningSource,
   SessionEvent,
+  SessionRunState,
   SessionUnsubscribe,
   StartAutoWriteOptions,
   WorkspaceIndex,
@@ -57,6 +58,7 @@ export {
   FOUNDATION_IMPACT_MODES,
   FOUNDATION_IMPACT_SEVERITIES,
   FOUNDATION_KEYS,
+  SESSION_RUN_STATES,
   WORKSPACE_INDEX_PATH,
 } from "./types.js";
 
@@ -71,6 +73,9 @@ export {
   SessionLlmRequiredError,
   WorkspaceClosedError,
 } from "./errors.js";
+export { AbortedError } from "../abort.js";
+export { LlmError } from "../ports/llm.js";
+export { StoreError, StoreRemoveUnsupportedError } from "../ports/store.js";
 
 export { createNovelSession } from "./novel-session.js";
 export { createNovelWorkspace } from "./workspace.js";

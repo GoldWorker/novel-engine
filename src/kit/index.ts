@@ -69,6 +69,11 @@ export type {
   InspectResult,
   OutlineUpdate,
   SessionEvent,
+  SessionRunState,
   SessionUnsubscribe,
   StartAutoWriteOptions,
 } from "../session/index.js";
+export { SESSION_RUN_STATES } from "../session/index.js";
+export { AbortedError } from "../abort.js";
+export { LlmError } from "../ports/llm.js";
+export { StoreError, StoreRemoveUnsupportedError } from "../ports/store.js";

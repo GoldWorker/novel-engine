@@ -1,18 +1,12 @@
+import { LlmError } from "../../ports/llm.js";
+
 /**
  * HTTP / mapping failure from an optional vendor adapter (`novel-engine/llm`).
+ * Subclass of portable `LlmError` so Worker restore and `instanceof LlmError` align.
  */
-export class LlmAdapterError extends Error {
-  readonly status?: number;
-  readonly body?: string;
-
+export class LlmAdapterError extends LlmError {
   constructor(message: string, options?: { status?: number; body?: string }) {
-    super(message);
+    super(message, options);
     this.name = "LlmAdapterError";
-    if (options?.status !== undefined) {
-      this.status = options.status;
-    }
-    if (options?.body !== undefined) {
-      this.body = options.body;
-    }
   }
 }

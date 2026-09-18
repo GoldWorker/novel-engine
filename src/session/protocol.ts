@@ -9,6 +9,9 @@ import {
   SessionLlmRequiredError,
   WorkspaceClosedError,
 } from "./errors.js";
+import { AbortedError } from "../abort.js";
+import { LlmError } from "../ports/llm.js";
+import { StoreError, StoreRemoveUnsupportedError, type StoreOperation } from "../ports/store.js";
 import { CHAPTER_WRITE_MODES, FOUNDATION_IMPACT_MODES, type FoundationGap } from "./types.js";
 import type { Progress } from "../domain/progress.js";
 import type {
@@ -29,6 +32,7 @@ import type {
   ApplyFoundationChangeResult,
   AssessFoundationImpactOptions,
   FoundationImpactAssessment,
+  SessionRunState,
 } from "./types.js";
 import { EngineError } from "../engine/index.js";
 
@@ -54,6 +58,8 @@ export type SessionCommandType =
   | "pause"
   | "resume"
   | "steer"
+  | "cancel"
+  | "getRunState"
   | "chapterGet"
   | "chapterSaveFinal"
   | "chapterWrite"
@@ -114,6 +120,8 @@ export type SessionSteerCommand = SessionEnvelope & {
   type: "steer";
   note: string;
 };
+export type SessionCancelCommand = SessionEnvelope & { type: "cancel" };
+export type SessionGetRunStateCommand = SessionEnvelope & { type: "getRunState" };
 export type SessionChapterGetCommand = SessionEnvelope & {
   type: "chapterGet";
   chapter: number;
@@ -150,6 +158,8 @@ export type SessionCommand =
   | SessionPauseCommand
   | SessionResumeCommand
   | SessionSteerCommand
+  | SessionCancelCommand
+  | SessionGetRunStateCommand
   | SessionChapterGetCommand
   | SessionChapterSaveFinalCommand
   | SessionChapterWriteCommand
@@ -181,6 +191,10 @@ export type SessionErrorNotice = {
   gaps?: FoundationGap[];
   chapter?: number;
   bookId?: string;
+  status?: number;
+  body?: string;
+  path?: string;
+  operation?: StoreOperation;
 };
 
 export type SessionNotice = SessionResultNotice | SessionEventNotice | SessionErrorNotice;
@@ -201,6 +215,8 @@ export type SessionRpcResult = {
   pause: BookControlResult;
   resume: BookControlResult;
   steer: BookControlResult;
+  cancel: BookControlResult;
+  getRunState: SessionRunState;
   chapterGet: ChapterView | null;
   chapterSaveFinal: null;
   chapterWrite: ChapterWriteResult;
@@ -240,6 +256,8 @@ export function isSessionCommand(value: unknown): value is SessionCommand {
       return isAutoWriteOptions(value.options);
     case "pause":
     case "resume":
+    case "cancel":
+    case "getRunState":
       return true;
     case "steer":
       return typeof value.note === "string";
@@ -284,6 +302,10 @@ export function serializeSessionError(err: unknown): {
   gaps?: FoundationGap[];
   chapter?: number;
   bookId?: string;
+  status?: number;
+  body?: string;
+  path?: string;
+  operation?: StoreOperation;
 } {
   if (err instanceof FoundationIncompleteError) {
     return { name: err.name, message: err.message, gaps: err.gaps };
@@ -293,6 +315,36 @@ export function serializeSessionError(err: unknown): {
   }
   if (err instanceof BookNotFoundError) {
     return { name: err.name, message: err.message, bookId: err.bookId };
+  }
+  if (err instanceof LlmError) {
+    const payload: {
+      name: string;
+      message: string;
+      status?: number;
+      body?: string;
+    } = { name: err.name, message: err.message };
+    if (err.status !== undefined) {
+      payload.status = err.status;
+    }
+    if (err.body !== undefined) {
+      payload.body = err.body;
+    }
+    return payload;
+  }
+  if (err instanceof StoreError) {
+    const payload: {
+      name: string;
+      message: string;
+      path?: string;
+      operation?: StoreOperation;
+    } = { name: err.name, message: err.message };
+    if (err.path !== undefined) {
+      payload.path = err.path;
+    }
+    if (err.operation !== undefined) {
+      payload.operation = err.operation;
+    }
+    return payload;
   }
   if (err instanceof Error) {
     return { name: err.name === "" ? "Error" : err.name, message: err.message };
@@ -306,6 +358,10 @@ export function restoreSessionError(payload: {
   gaps?: FoundationGap[];
   chapter?: number;
   bookId?: string;
+  status?: number;
+  body?: string;
+  path?: string;
+  operation?: StoreOperation;
 }): Error {
   switch (payload.name) {
     case "FoundationIncompleteError":
@@ -328,6 +384,33 @@ export function restoreSessionError(payload: {
       return new BookNotFoundError(payload.bookId ?? payload.message);
     case "EngineError":
       return new EngineError(payload.message);
+    case "AbortedError":
+      return new AbortedError(payload.message);
+    case "LlmError":
+    case "LlmAdapterError": {
+      const llmOpts: { status?: number; body?: string } = {};
+      if (payload.status !== undefined) {
+        llmOpts.status = payload.status;
+      }
+      if (payload.body !== undefined) {
+        llmOpts.body = payload.body;
+      }
+      const llmErr = new LlmError(payload.message, llmOpts);
+      llmErr.name = payload.name;
+      return llmErr;
+    }
+    case "StoreRemoveUnsupportedError":
+      return new StoreRemoveUnsupportedError(payload.message);
+    case "StoreError": {
+      const storeOpts: { path?: string; operation?: StoreOperation } = {};
+      if (payload.path !== undefined) {
+        storeOpts.path = payload.path;
+      }
+      if (payload.operation !== undefined) {
+        storeOpts.operation = payload.operation;
+      }
+      return new StoreError(payload.message, storeOpts);
+    }
     default: {
       const err = new Error(payload.message);
       err.name = payload.name;

@@ -46,5 +46,7 @@ export async function demoKitNode(): Promise<void> {
     }
   });
   await kit.pauseBook(); // { status: "idle" } when startBook is not running
+  console.log(await kit.getRunState()); // "idle"
+  await kit.cancelBook(); // no-op when idle
   kit.dispose();
 }

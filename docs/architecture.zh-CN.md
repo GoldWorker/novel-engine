@@ -137,9 +137,9 @@ Worker → 主线程通知：`event` / `snapshot` / `error`。
 
 命令（含增量 S5/S6）：
 
-`inspectFoundation` | `getFoundation` | `getProgress` | `assertReadyToWrite` | `listArtifacts` | `exportSnapshot` | `importSnapshot` | `upsertFoundation` | `generateFoundation` | `assessFoundationImpact` | `applyFoundationChange` | `startAutoWrite` | `pause` | `resume` | `steer` | `chapterGet` | `chapterSaveFinal` | `chapterWrite` | `chapterDelete` | `close`
+`inspectFoundation` | `getFoundation` | `getProgress` | `assertReadyToWrite` | `listArtifacts` | `exportSnapshot` | `importSnapshot` | `upsertFoundation` | `generateFoundation` | `assessFoundationImpact` | `applyFoundationChange` | `startAutoWrite` | `pause` | `resume` | `steer` | `cancel` | `getRunState` | `chapterGet` | `chapterSaveFinal` | `chapterWrite` | `chapterDelete` | `close`
 
-通知：`result` | `event` | `error`。
+通知：`result` | `event` | `error`。**兼容（0.7.0）：** `SESSION_PROTOCOL` 仍为 `1`；`cancel` / `getRunState` 为增量命令。`AbortSignal` 不做 structured clone——客户端把宿主 `signal` 映射成 `cancel` RPC。
 
 `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` **在 Worker 里跑**，因为书的 `StorePort` 在那边（通常是 OPFS）。主线程 generate/apply 会写到另一份 store。
 
@@ -167,7 +167,9 @@ Kit 只是组合 + 默认值。**不**改 Session/Engine 协议。
 
 `pause` / `resume` / `steer` **不**占 busy。它们转发到 `startAutoWrite` → `Engine.run` 期间持有的 Engine 实例。没有 Engine 在跑时返回 `{ status: "idle" }`。`generateMissing`（`Engine.run` 之前）期间为 idle。空 steer 笔记抛 `EngineError`。
 
-读取（`getFoundation`、`inspectFoundation`、`assessFoundationImpact`、`chapter.get` …）不占 busy。Session **不缓存**产物——每次都是 store 直读。
+**新增（0.7.0）：** `cancel()` / `cancelBook()` 同样不占 busy。空闲 cancel 为 `{ status: "idle" }`。进行中的长任务（`startAutoWrite`、`generateFoundation`、`chapter.write` …）以 `AbortedError` 拒绝，随后清除 busy 与 `runningEngine`。`getRunState()` 是纯读取（`"idle" | "generating_missing" | "running" | "paused" | "busy"`）：`running` / `paused` 表示 pause/steer 会是 `ok`；其他状态表示它们会是 `idle`。start/generate/write 上的可选 `signal` 由宿主选择加入；不传则与 0.6.0 一致。
+
+读取（`getFoundation`、`inspectFoundation`、`assessFoundationImpact`、`chapter.get`、`getRunState` …）不占 busy。Session **不缓存**产物——每次都是 store 直读。
 
 `close()` / 工作区 `switchTo` / `open` 会关闭上一份 session。再使用旧引用会抛 `SessionClosedError`。
 

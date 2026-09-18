@@ -1,3 +1,4 @@
+import { AbortedError, isAbortError, throwIfAborted, toAbortedError } from "../abort.js";
 import type { Flow } from "../domain/flow.js";
 import { validateFlowTransition } from "../domain/flow.js";
 import type { Phase } from "../domain/phase.js";
@@ -13,6 +14,8 @@ import { PATHS } from "../store/paths.js";
 import { runWorker } from "../workers/loop.js";
 import { bootstrap } from "./bootstrap.js";
 import { planStartFallback } from "./plan-start.js";
+
+export { AbortedError } from "../abort.js";
 
 export interface EngineDeps {
   store: StorePort;
@@ -60,6 +63,8 @@ const DEADLOCK_ABORT_AT = 5;
  *
  * `pause` / `resume` / `steer` are cooperative: they take effect at the next
  * loop boundary (after the current Worker instruction finishes).
+ * `cancel()` / optional `run({ signal })` abort the in-flight run with
+ * `AbortedError` (not an `EngineResult` stop reason).
  */
 export class Engine {
   private readonly store: StorePort;
@@ -73,6 +78,9 @@ export class Engine {
   private pauseRequested = false;
   private resumeWaiter: (() => void) | null = null;
   private running = false;
+  private abortRequested = false;
+  private runSignal: AbortSignal | undefined;
+  private runAbort: AbortController | null = null;
   private lastResult: EngineResult | null = null;
 
   constructor(deps: EngineDeps) {
@@ -114,6 +122,22 @@ export class Engine {
   /** Request a yield at the next loop boundary. */
   pause(): void {
     this.pauseRequested = true;
+  }
+
+  /**
+   * Abort an in-flight `run()`. No-op when idle. Takes effect at the next
+   * loop boundary or by aborting the current `LlmPort.complete` wait.
+   * `run()` then throws `AbortedError`.
+   */
+  cancel(): void {
+    if (!this.running) {
+      return;
+    }
+    this.abortRequested = true;
+    this.runAbort?.abort();
+    const waiter = this.resumeWaiter;
+    this.resumeWaiter = null;
+    waiter?.();
   }
 
   /**
@@ -170,18 +194,39 @@ export class Engine {
     this.pause();
   }
 
-  async run(input: { prompt?: string; maxSteps?: number } = {}): Promise<EngineResult> {
+  async run(
+    input: { prompt?: string; maxSteps?: number; signal?: AbortSignal } = {},
+  ): Promise<EngineResult> {
     if (this.running) {
       throw new EngineError("engine is already running");
     }
     this.running = true;
+    this.abortRequested = false;
     this.failedKey = "";
     this.lastKey = "";
     this.repeats = 0;
+    const controller = new AbortController();
+    this.runAbort = controller;
+    this.runSignal = controller.signal;
+    const onAbort = (): void => {
+      this.cancel();
+    };
+    const detach = attachRunSignal(input.signal, onAbort);
     try {
+      throwIfAborted(input.signal);
+      throwIfAborted(controller.signal);
       return await this.runLoop(input);
+    } catch (err) {
+      if (isAbortError(err) || this.abortRequested) {
+        throw toAbortedError(err);
+      }
+      throw err;
     } finally {
+      detach();
       this.running = false;
+      this.abortRequested = false;
+      this.runSignal = undefined;
+      this.runAbort = null;
     }
   }
 
@@ -193,7 +238,9 @@ export class Engine {
     let lastError: string | undefined;
 
     while (steps < limit) {
+      this.throwIfAborted();
       await this.waitIfPaused();
+      this.throwIfAborted();
       const state = await this.store.loadState();
       if (state.progress?.phase === "complete") {
         return this.finish("complete", state.progress.phase, steps, lastInstruction);
@@ -224,6 +271,9 @@ export class Engine {
         await this.dispatch(inst);
         this.failedKey = "";
       } catch (err) {
+        if (isAbortError(err) || this.abortRequested) {
+          throw toAbortedError(err);
+        }
         const message = err instanceof Error ? err.message : String(err);
         lastError = message;
         const key = instructionKey(inst);
@@ -266,10 +316,18 @@ export class Engine {
         });
       }
     }
-    await runWorker(this.store, this.llm, inst, this.maxWorkerTurns);
+    await runWorker(this.store, this.llm, inst, this.maxWorkerTurns, this.runSignal);
+  }
+
+  private throwIfAborted(): void {
+    if (this.abortRequested) {
+      throw new AbortedError();
+    }
+    throwIfAborted(this.runSignal);
   }
 
   private async waitIfPaused(): Promise<void> {
+    this.throwIfAborted();
     if (!this.pauseRequested) {
       return;
     }
@@ -277,6 +335,7 @@ export class Engine {
     await new Promise<void>((resolve) => {
       this.resumeWaiter = resolve;
     });
+    this.throwIfAborted();
   }
 
   private async clearPendingSteer(): Promise<void> {
@@ -329,6 +388,20 @@ export class Engine {
 
 function instructionKey(inst: Instruction): string {
   return `${inst.agent}\0${inst.task}`;
+}
+
+function attachRunSignal(signal: AbortSignal | undefined, onAbort: () => void): () => void {
+  if (signal === undefined) {
+    return () => {};
+  }
+  if (signal.aborted) {
+    onAbort();
+    return () => {};
+  }
+  signal.addEventListener("abort", onAbort);
+  return () => {
+    signal.removeEventListener("abort", onAbort);
+  };
 }
 
 export function createEngine(deps: EngineDeps): Engine {

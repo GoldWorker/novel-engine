@@ -202,7 +202,13 @@ export function createAnthropicLlm(options: AnthropicLlmOptions): LlmPort {
       if (request.tools && request.tools.length > 0) {
         body.tools = mapTools(request.tools);
       }
-      const payload = await postJson({ fetch: fetchImpl, url, headers, body });
+      const payload = await postJson({
+        fetch: fetchImpl,
+        url,
+        headers,
+        body,
+        ...(request.signal !== undefined ? { signal: request.signal } : {}),
+      });
       return parseAnthropicResult(payload);
     },
   };

@@ -26,8 +26,53 @@ export interface StorePort {
   list?(prefix?: string): readonly string[] | Promise<readonly string[]>;
   /**
    * Optional delete. `MemoryStore` and `OpfsStore` implement this so Session
-   * can invalidate `meta/foundation_audit.json` after fingerprint files change.
-   * Missing paths are a no-op. Custom adapters may omit it.
+   * can invalidate `meta/foundation_audit.json` after fingerprint files change
+   * and `chapter.delete` can drop chapter artifacts. Missing paths are a no-op.
+   * Custom adapters may omit it — `chapter.delete` then throws
+   * `StoreRemoveUnsupportedError` before mutating progress.
    */
   remove?(path: string): Promise<void>;
+}
+
+export type StoreOperation = "read" | "write" | "remove" | "list" | "has";
+
+/**
+ * Failure from a store operation hosts hit (delete, optional `remove`, …).
+ * Serializable across the Session Worker bridge.
+ */
+export class StoreError extends Error {
+  readonly path?: string;
+  readonly operation?: StoreOperation;
+
+  constructor(message: string, options?: { path?: string; operation?: StoreOperation }) {
+    super(message);
+    this.name = "StoreError";
+    if (options?.path !== undefined) {
+      this.path = options.path;
+    }
+    if (options?.operation !== undefined) {
+      this.operation = options.operation;
+    }
+  }
+}
+
+/**
+ * `StorePort.remove` is missing. Thrown by `chapter.delete` before any
+ * progress mutation so hosts do not get a half-deleted chapter.
+ */
+export class StoreRemoveUnsupportedError extends StoreError {
+  constructor(
+    message = "chapter.delete requires StorePort.remove (MemoryStore and OpfsStore implement it)",
+  ) {
+    super(message, { operation: "remove" });
+    this.name = "StoreRemoveUnsupportedError";
+  }
+}
+
+export function requireStoreRemove(store: StorePort): (path: string) => Promise<void> {
+  if (typeof store.remove !== "function") {
+    throw new StoreRemoveUnsupportedError();
+  }
+  const remove = store.remove.bind(store);
+  return (path: string) => remove(path);
 }

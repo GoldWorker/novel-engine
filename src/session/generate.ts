@@ -1,5 +1,6 @@
 import { inferPlanningStub } from "../engine/plan-start.js";
-import type { LlmPort } from "../ports/llm.js";
+import { raceAbort } from "../abort.js";
+import type { LlmCompletionRequest, LlmPort } from "../ports/llm.js";
 import type { StorePort } from "../ports/store.js";
 import { FoundationGenerateError } from "./errors.js";
 import {
@@ -234,10 +235,11 @@ export async function completeFoundationJson(
   prompt: string,
   keys: readonly FoundationKey[],
   meta: FoundationMeta,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const planning = await resolveSessionPlanning(store, prompt);
   const stub = inferPlanningStub(prompt);
-  const result = await llm.complete({
+  const request: LlmCompletionRequest = {
     agent: stub.planner,
     messages: [
       {
@@ -256,6 +258,10 @@ export async function completeFoundationJson(
         ].join("\n\n"),
       },
     ],
-  });
+  };
+  if (signal !== undefined) {
+    request.signal = signal;
+  }
+  const result = await raceAbort(llm.complete(request), signal);
   return parseFoundationJsonText(result.text);
 }

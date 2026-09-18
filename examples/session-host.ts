@@ -8,7 +8,8 @@
  * Protocol (`SESSION_PROTOCOL === 1`, `ns: "session"`):
  *   main → worker:  inspectFoundation | getFoundation | upsertFoundation |
  *                   generateFoundation | assessFoundationImpact |
- *                   applyFoundationChange | startAutoWrite | chapterGet |
+ *                   applyFoundationChange | startAutoWrite | pause | resume |
+ *                   steer | cancel | getRunState | chapterGet |
  *                   chapterSaveFinal | chapterWrite | …
  *   worker → main:  result | event | error
  *

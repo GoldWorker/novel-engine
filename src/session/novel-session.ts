@@ -1,3 +1,10 @@
+import {
+  AbortedError,
+  attachAbort,
+  isAbortError,
+  throwIfAborted,
+  toAbortedError,
+} from "../abort.js";
 import type { Progress } from "../domain/progress.js";
 import {
   createEngine,
@@ -61,6 +68,7 @@ import type {
   InspectResult,
   NovelSession,
   SessionEvent,
+  SessionRunState,
   SessionUnsubscribe,
   StartAutoWriteOptions,
 } from "./types.js";
@@ -78,6 +86,11 @@ export class NovelSessionImpl implements NovelSession {
   private busy = false;
   /** Engine instance held only while `startAutoWrite` → `Engine.run` is in flight. */
   private runningEngine: Engine | null = null;
+  /** Standalone `generateFoundation` (not busy-locked). */
+  private generating = false;
+  /** `startAutoWrite` after busy is taken, before `Engine.run`. */
+  private autoWritePreEngine = false;
+  private readonly abortCtls = new Set<AbortController>();
   private readonly listeners = new Set<(event: SessionEvent) => void>();
 
   constructor(options: CreateNovelSessionOptions) {
@@ -88,7 +101,7 @@ export class NovelSessionImpl implements NovelSession {
       store: this.store,
       requireOpen: () => this.assertOpen(),
       requireLlm: () => this.requireLlm(),
-      withBusy: (fn) => this.withBusy(fn),
+      withBusy: (fn, external) => this.withBusy(fn, external),
       emit: (event) => this.emit(event),
       upsertFoundation: (patch) => this.upsertFoundation(patch),
     });
@@ -119,6 +132,21 @@ export class NovelSessionImpl implements NovelSession {
   async getProgress(): Promise<Progress | null> {
     this.assertOpen();
     return this.store.loadProgress();
+  }
+
+  async getRunState(): Promise<SessionRunState> {
+    this.assertOpen();
+    const engine = this.runningEngine;
+    if (engine) {
+      return engine.isPaused ? "paused" : "running";
+    }
+    if (this.generating || this.autoWritePreEngine) {
+      return "generating_missing";
+    }
+    if (this.busy) {
+      return "busy";
+    }
+    return "idle";
   }
 
   async inspectFoundation(options: { prompt?: string } = {}): Promise<InspectResult> {
@@ -180,37 +208,25 @@ export class NovelSessionImpl implements NovelSession {
     options: ApplyFoundationChangeOptions,
   ): Promise<ApplyFoundationChangeResult> {
     this.assertOpen();
-    return this.withBusy(() => this.runApplyFoundationChange(options));
+    return this.withBusy((signal) => this.runApplyFoundationChange(options, signal));
   }
 
   async generateFoundation(options: GenerateFoundationOptions): Promise<FoundationMeta> {
     this.assertOpen();
     const llm = this.requireLlm();
-    const requested = assertFoundationKeys(options.keys);
-    const mode = options.mode ?? "fill_missing";
-    const selected = await keysToGenerate(
-      requested,
-      mode,
-      (inspectOpts) => this.inspectFoundation(inspectOpts),
-      options.prompt,
-    );
-    if (selected.length === 0) {
-      return this.readFoundation();
-    }
-    const parsed = await completeFoundationJson(
-      llm,
-      this.store,
-      options.prompt,
-      selected,
-      await this.readFoundation(),
-    );
-    const patch = patchFromGeneratedJson(parsed, selected);
-    return this.upsertFoundation(patch);
+    return this.withAbort(options.signal, async (signal) => {
+      this.generating = true;
+      try {
+        return await this.runGenerateFoundation(options, llm, signal);
+      } finally {
+        this.generating = false;
+      }
+    });
   }
 
   async startAutoWrite(options: StartAutoWriteOptions): Promise<AutoWriteResult> {
     this.assertOpen();
-    return this.withBusy(() => this.runAutoWrite(options));
+    return this.withBusy((signal) => this.runAutoWrite(options, signal), options.signal);
   }
 
   async pause(): Promise<BookControlResult> {
@@ -247,13 +263,58 @@ export class NovelSessionImpl implements NovelSession {
     return { status: "ok" };
   }
 
+  async cancel(): Promise<BookControlResult> {
+    this.assertOpen();
+    const engine = this.runningEngine;
+    if (!engine && this.abortCtls.size === 0) {
+      return { status: "idle" };
+    }
+    engine?.cancel();
+    for (const controller of this.abortCtls) {
+      controller.abort();
+    }
+    return { status: "ok" };
+  }
+
+  private async runGenerateFoundation(
+    options: GenerateFoundationOptions,
+    llm: LlmPort,
+    signal: AbortSignal,
+  ): Promise<FoundationMeta> {
+    const requested = assertFoundationKeys(options.keys);
+    const mode = options.mode ?? "fill_missing";
+    const selected = await keysToGenerate(
+      requested,
+      mode,
+      (inspectOpts) => this.inspectFoundation(inspectOpts),
+      options.prompt,
+    );
+    throwIfAborted(signal);
+    if (selected.length === 0) {
+      return this.readFoundation();
+    }
+    const parsed = await completeFoundationJson(
+      llm,
+      this.store,
+      options.prompt,
+      selected,
+      await this.readFoundation(),
+      signal,
+    );
+    throwIfAborted(signal);
+    const patch = patchFromGeneratedJson(parsed, selected);
+    return this.upsertFoundation(patch);
+  }
+
   private async runApplyFoundationChange(
     options: ApplyFoundationChangeOptions,
+    signal: AbortSignal,
   ): Promise<ApplyFoundationChangeResult> {
     const assessOpts: AssessFoundationImpactOptions = {};
     if (options.refineWithLlm !== undefined) {
       assessOpts.refineWithLlm = options.refineWithLlm;
     }
+    throwIfAborted(signal);
     const assessment = await this.assessFoundationImpact(options.patch, assessOpts);
     const requireConfirm = options.requireConfirmRewrite !== false;
     if (
@@ -279,17 +340,20 @@ export class NovelSessionImpl implements NovelSession {
       }
     }
 
+    throwIfAborted(signal);
     const meta = await this.upsertFoundation(options.patch);
     if (writePlan) {
       const llm = this.requireLlm();
       const instruction = options.instruction ?? defaultRewriteInstruction(assessment);
       for (const chapter of writePlan.chapters) {
+        throwIfAborted(signal);
         writes.push(
           await runChapterWrite(
             this.store,
             llm,
             { chapter, mode: writePlan.mode, instruction },
             (event) => this.emit(event),
+            signal,
           ),
         );
       }
@@ -297,74 +361,117 @@ export class NovelSessionImpl implements NovelSession {
     return { status: "applied", assessment, meta, writes };
   }
 
-  private async runAutoWrite(options: StartAutoWriteOptions): Promise<AutoWriteResult> {
-    if (options.foundation !== undefined) {
-      await this.upsertFoundation(options.foundation);
-    }
-    if (options.generateMissing === true) {
-      this.requireLlm();
-      const inspected = await this.inspectFoundation({ prompt: options.prompt });
-      const keys = missingKeysFromGaps(inspected.gaps, inspected.planning.tier);
-      if (keys.length > 0) {
-        await this.generateFoundation({
-          prompt: options.prompt,
-          keys,
-          mode: "fill_missing",
-        });
-      }
-    }
-
-    const inspected = await this.inspectFoundation({ prompt: options.prompt });
-    const requireConfirm = options.requireConfirmGaps !== false;
-    const auditOnly = isAuditOnlyGaps(inspected.gaps);
-    const proceedDespiteAudit = auditOnly && options.confirmAuditGap === true;
-    if (requireConfirm && inspected.gaps.length > 0 && !proceedDespiteAudit) {
-      const result: AutoWriteResult = {
-        status: "needs_foundation",
-        gaps: inspected.gaps,
-        meta: inspected.meta,
-        auditOnly,
-      };
-      this.emit({ type: "stopped", result });
-      return result;
-    }
-
-    const llm = this.requireLlm();
-    const deps: EngineDeps = {
-      store: this.store,
-      llm,
-      onEvent: this.onEngineEvent,
-    };
-    if (options.maxSteps !== undefined) {
-      deps.maxSteps = options.maxSteps;
-    }
-    const engine = createEngine(deps);
-    const runInput: { prompt: string; maxSteps?: number } = { prompt: options.prompt };
-    if (options.maxSteps !== undefined) {
-      runInput.maxSteps = options.maxSteps;
-    }
-    this.runningEngine = engine;
+  private async runAutoWrite(
+    options: StartAutoWriteOptions,
+    signal: AbortSignal,
+  ): Promise<AutoWriteResult> {
+    this.autoWritePreEngine = true;
     try {
-      const engineResult = await engine.run(runInput);
-      const meta = await this.readFoundation();
-      const status = engineResult.stoppedReason === "complete" ? "completed" : "stopped";
-      const result: AutoWriteResult = { status, result: engineResult, meta };
-      this.emit({ type: "stopped", result });
-      return result;
+      throwIfAborted(signal);
+      if (options.foundation !== undefined) {
+        await this.upsertFoundation(options.foundation);
+      }
+      if (options.generateMissing === true) {
+        this.requireLlm();
+        const inspected = await this.inspectFoundation({ prompt: options.prompt });
+        const keys = missingKeysFromGaps(inspected.gaps, inspected.planning.tier);
+        if (keys.length > 0) {
+          await this.runGenerateFoundation(
+            { prompt: options.prompt, keys, mode: "fill_missing" },
+            this.requireLlm(),
+            signal,
+          );
+        }
+      }
+
+      const inspected = await this.inspectFoundation({ prompt: options.prompt });
+      const requireConfirm = options.requireConfirmGaps !== false;
+      const auditOnly = isAuditOnlyGaps(inspected.gaps);
+      const proceedDespiteAudit = auditOnly && options.confirmAuditGap === true;
+      if (requireConfirm && inspected.gaps.length > 0 && !proceedDespiteAudit) {
+        const result: AutoWriteResult = {
+          status: "needs_foundation",
+          gaps: inspected.gaps,
+          meta: inspected.meta,
+          auditOnly,
+        };
+        this.emit({ type: "stopped", result });
+        return result;
+      }
+
+      throwIfAborted(signal);
+      const llm = this.requireLlm();
+      const deps: EngineDeps = {
+        store: this.store,
+        llm,
+        onEvent: this.onEngineEvent,
+      };
+      if (options.maxSteps !== undefined) {
+        deps.maxSteps = options.maxSteps;
+      }
+      const engine = createEngine(deps);
+      const runInput: { prompt: string; maxSteps?: number; signal: AbortSignal } = {
+        prompt: options.prompt,
+        signal,
+      };
+      if (options.maxSteps !== undefined) {
+        runInput.maxSteps = options.maxSteps;
+      }
+      this.runningEngine = engine;
+      this.autoWritePreEngine = false;
+      try {
+        const engineResult = await engine.run(runInput);
+        const meta = await this.readFoundation();
+        const status = engineResult.stoppedReason === "complete" ? "completed" : "stopped";
+        const result: AutoWriteResult = { status, result: engineResult, meta };
+        this.emit({ type: "stopped", result });
+        return result;
+      } finally {
+        this.runningEngine = null;
+      }
     } finally {
-      this.runningEngine = null;
+      this.autoWritePreEngine = false;
     }
   }
 
-  private async withBusy<T>(fn: () => Promise<T>): Promise<T> {
+  private async withBusy<T>(
+    fn: (signal: AbortSignal) => Promise<T>,
+    external?: AbortSignal,
+  ): Promise<T> {
     if (this.busy) {
       throw new SessionBusyError();
     }
+    if (external?.aborted) {
+      throw new AbortedError();
+    }
     this.busy = true;
     try {
-      return await fn();
+      return await this.withAbort(external, fn);
     } finally {
       this.busy = false;
+    }
+  }
+
+  private async withAbort<T>(
+    external: AbortSignal | undefined,
+    fn: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const controller = new AbortController();
+    this.abortCtls.add(controller);
+    const detach = attachAbort(external, () => {
+      controller.abort();
+    });
+    try {
+      throwIfAborted(controller.signal);
+      return await fn(controller.signal);
+    } catch (err) {
+      if (controller.signal.aborted || isAbortError(err)) {
+        throw toAbortedError(err);
+      }
+      throw err;
+    } finally {
+      detach();
+      this.abortCtls.delete(controller);
     }
   }
 

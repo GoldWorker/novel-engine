@@ -24,6 +24,7 @@ import {
   type NovelWorkspace,
   type OutlineUpdate,
   type SessionEvent,
+  type SessionRunState,
   type SessionUnsubscribe,
   type StartAutoWriteOptions,
 } from "../session/index.js";
@@ -186,6 +187,16 @@ export class NovelKit {
   async steerBook(message: string): Promise<BookControlResult> {
     this.assertOpen();
     return this.session.steer(message);
+  }
+
+  async cancelBook(): Promise<BookControlResult> {
+    this.assertOpen();
+    return this.session.cancel();
+  }
+
+  async getRunState(): Promise<SessionRunState> {
+    this.assertOpen();
+    return this.session.getRunState();
   }
 
   async assessFoundation(
