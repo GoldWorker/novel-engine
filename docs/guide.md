@@ -47,6 +47,7 @@ From `src/lib/engine.ts`:
 ```ts
 import { createEngine, MemoryStore } from "../../vendor/novel-engine/dist/index.js";
 import { createNovelSession } from "../../vendor/novel-engine/dist/session.js";
+import { NovelKit } from "../../vendor/novel-engine/dist/kit.js";
 import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js";
 import { createOpenAiLlm } from "../../vendor/novel-engine/dist/llm.js";
 ```
@@ -65,7 +66,7 @@ Still “inside the app”, not a sibling repo:
 }
 ```
 
-Then the usual imports work: `novel-engine`, `novel-engine/session`, `novel-engine/worker`, `novel-engine/llm`. Rebuild `vendor/novel-engine` after engine updates (`npm run build` there).
+Then the usual imports work: `novel-engine`, `novel-engine/kit`, `novel-engine/session`, `novel-engine/worker`, `novel-engine/llm`. Rebuild `vendor/novel-engine` after engine updates (`npm run build` there).
 
 #### TypeScript `paths` → `src/` (bundlers only)
 
@@ -77,6 +78,7 @@ Next.js / Vite (`moduleResolution: "bundler"`) can compile the TypeScript tree. 
     "moduleResolution": "bundler",
     "paths": {
       "novel-engine": ["./vendor/novel-engine/src/index.ts"],
+      "novel-engine/kit": ["./vendor/novel-engine/src/kit/index.ts"],
       "novel-engine/session": ["./vendor/novel-engine/src/session/index.ts"],
       "novel-engine/worker": ["./vendor/novel-engine/src/worker.ts"],
       "novel-engine/llm": ["./vendor/novel-engine/src/adapters/llm/index.ts"]
@@ -102,6 +104,15 @@ A sibling checkout with `"novel-engine": "file:../novel-engine"` (after that tre
 Packaging internals: [architecture](architecture.md#packaging-exports--local-consume).
 
 ## Getting started
+
+**Out-of-the-box (recommended for a browser workbench):** [`novel-engine/kit`](guide-kit.md) — `NovelKit.create`, shipped worker, defaults OPFS + Worker. Node/tests: `runtime: "main"` + `store: "memory"`.
+
+```ts
+import { NovelKit } from "novel-engine/kit";
+
+const kit = await NovelKit.create({ llmEndpoint: "/api/llm" });
+const { gaps, readyToWrite } = await kit.inspect({ prompt: "写一本三章短篇" });
+```
 
 Same-thread Engine with `MemoryStore` + `MockLlm` (package-name imports; use the relative `dist/` paths above when vendoring without `file:`):
 

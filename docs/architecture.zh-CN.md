@@ -143,9 +143,23 @@ Worker → 主线程通知：`event` / `snapshot` / `error`。
 
 `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` **在 Worker 里跑**，因为书的 `StorePort` 在那边（通常是 OPFS）。主线程 generate/apply 会写到另一份 store。
 
-没有 Workspace-over-Worker：把 `createNovelWorkspace` 留在 UI 线程，每本书开一个 session Worker。
+没有 Workspace-over-Worker：把 `createNovelWorkspace` 留在 UI 线程，每本书开一个 session Worker。**Kit**（`novel-engine/kit`）替你做这件事（并自带 Worker）。
 
-契约：[session.zh-CN.md](session.zh-CN.md#s4--worker-桥)。宿主怎么用：[指南 §8](guide.zh-CN.md#scenario-session-worker)。
+契约：[session.zh-CN.md](session.zh-CN.md#s4--worker-桥)。宿主怎么用：[指南 §8](guide.zh-CN.md#scenario-session-worker)。Kit：[guide-kit](guide-kit.zh-CN.md)。
+
+<a id="kit-worker-init"></a>
+
+## Kit Worker init（`KIT_PROTOCOL`）
+
+`KIT_PROTOCOL === 1`，`ns: "kit"`——不与 Engine 或 Session 冲突。在任何 session 命令**之前只用一次**。
+
+主线程 → Worker `init`：`{ v, ns, type: "init", id, bookId, llmEndpoint, store: "opfs" | "memory", fallbackToMemory, opfsDirectory? }`。
+
+Worker → 主线程 `ready`：`{ v, ns, type: "ready", id, bookId, storeKind }` 或 `error`。
+
+随后沿用现有 Session 桥（`SESSION_PROTOCOL`，`ns: "session"`）。随包装箱发布的 `dist/novel-kit.worker.js` 调用 `attachKitWorker(self)`：创建 store + `fetch(llmEndpoint)` 的 `LlmPort`、`createNovelSession`、`attachSessionWorker`。Worker 里没有 API Key。默认 `workerUrl` 是相对 `dist/kit.js` 的 `new URL("./novel-kit.worker.js", import.meta.url)`；若打包器 404，把该文件拷到 `public/`。
+
+Kit 只是组合 + 默认值。**不**改 Session/Engine 协议。
 
 ## Busy / session 生命周期
 
@@ -197,9 +211,11 @@ foundationMissing(store: StorePort, tier?: PlanningTier): Promise<string[]>
 | `./worker` | `dist/worker.js` | `dist/worker.d.ts` |
 | `./llm` | `dist/llm.js` | `dist/llm.d.ts` |
 | `./session` | `dist/session.js` | `dist/session.d.ts` |
+| `./kit` | `dist/kit.js` | `dist/kit.d.ts` |
+| `./kit/worker` | `dist/novel-kit.worker.js` | `dist/novel-kit.worker.d.ts` |
 | `./package.json` | `package.json` | — |
 
-`npm pack` / 登记处用的 `files`：`dist/`、`README.md`、`LICENSE`（`dist/` 被 gitignore — 必须 `npm run build`）。仅 ESM（`"type": "module"`）。`fflate` 保持 external，让宿主从 `node_modules` 解析它。
+`npm pack` / 登记处用的 `files`：`dist/`、`README.md`、`LICENSE`（`dist/` 被 gitignore — 必须 `npm run build`）。仅 ESM（`"type": "module"`）。`.` / `./worker` / `./session` / `./kit` 仍把 `fflate` 保持 external，让宿主从 `node_modules` 解析。随包装箱发布的 `./kit/worker` 会把 `fflate` 打进 Worker，这样拷到 `public/` 的 `novel-kit.worker.js` 不必在 Dedicated Worker 里解析裸说明符。
 
 把本树**拷进** `vendor/novel-engine/`（等）的宿主，用相对路径导入 `dist/*.js`，或在副本里 `npm install && npm run build` 后用 `"novel-engine": "file:./vendor/novel-engine"` 保留包名。`src/*.ts` 不是 `exports` 条件；打包器可通过 `tsconfig` `paths` 编译它（见指南）。Node 不能直接跑 TypeScript 树（`.ts` 文件里的说明符是 `.js`）。
 

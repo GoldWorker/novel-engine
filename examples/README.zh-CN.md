@@ -12,6 +12,7 @@
 
 | 场景（指南） | 文件 |
 | --- | --- |
+| [0. NovelKit（推荐）](../docs/guide-kit.zh-CN.md) | [`kit-host.ts`](kit-host.ts) |
 | [1. 短篇完结](../docs/guide.zh-CN.md#scenario-short-book) | [`short-book.ts`](short-book.ts) |
 | [2. 分层中长篇](../docs/guide.zh-CN.md#scenario-layered-book) | [`layered-book.ts`](layered-book.ts) |
 | [3. 浏览器持久化（OPFS）](../docs/guide.zh-CN.md#scenario-opfs) | [`opfs-store.ts`](opfs-store.ts) |

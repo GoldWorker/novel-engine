@@ -1,12 +1,12 @@
-# novel-engine API（0.4.0）
+# novel-engine API（0.5.0）
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
 宿主应用的稳定面。除非另有说明，一律从 `novel-engine` 导入。发布包只包含 `dist/`、`README.md` 和 `LICENSE`。拷进宿主的副本用相对路径导入 `dist/*.js`，或构建后 `"novel-engine": "file:./vendor/novel-engine"` —— [指南 — 安装](guide.zh-CN.md#install)。
 
-本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。默认入口（`.` / `./worker`）不打包供应商 LLM 客户端。可选 fetch 适配器：[`novel-engine/llm`](llm-adapters.zh-CN.md)。可选宿主 Session：[`novel-engine/session`](session.zh-CN.md)。`src/` 从不导入 `node:fs` / `node:path`。
+本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。默认入口（`.` / `./worker`）不打包供应商 LLM 客户端。可选 fetch 适配器：[`novel-engine/llm`](llm-adapters.zh-CN.md)。可选开箱宿主：[`novel-engine/kit`](guide-kit.zh-CN.md)。可选宿主 Session（参考实现）：[`novel-engine/session`](session.zh-CN.md)。`src/` 从不导入 `node:fs` / `node:path`。
 
-宿主怎么用：[指南](guide.zh-CN.md)（[English](guide.md)）。实现：[架构](architecture.zh-CN.md)。文档索引：[README](README.zh-CN.md)。可跑通的源码在 [`examples/`](../examples/)。
+宿主怎么用：[指南](guide.zh-CN.md)（[English](guide.md)）· [kit](guide-kit.zh-CN.md)。实现：[架构](architecture.zh-CN.md)。文档索引：[README](README.zh-CN.md)。可跑通的源码在 [`examples/`](../examples/)。
 
 ## 包入口
 
@@ -16,12 +16,15 @@
 | `./worker` | `dist/worker.js` | `attachEngineWorker`，以及供专用 Worker 使用的 Engine / stores / snapshot |
 | `./llm` | `dist/llm.js` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope）。不会打进 `.` 或 `./worker`。 |
 | `./session` | `dist/session.js` | 可选同线程宿主 Session（S0–S6 检查、生成、自动写作、ChapterRunner、基础设定影响、Worker 桥、工作区）。不会打进 `.` / `./worker` / `./llm`。 |
+| `./kit` | `dist/kit.js` | 开箱 `NovelKit.create`（默认 OPFS + Worker）。不会打进 `.` / `./worker` / `./llm` / `./session`。 |
+| `./kit/worker` | `dist/novel-kit.worker.js` | 随包装箱发布的 Kit Dedicated Worker。Init 握手后接 Session 桥。 |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
+import { NovelKit } from "novel-engine/kit";
 ```
 
 ## Engine（引擎）
@@ -164,6 +167,30 @@ tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放�
 `generateFoundation` 要求 `LlmPort.complete` 在 **`text` 里返回 JSON**（不新增 tools）。走 Worker 桥时它在 **Worker 里**跑。`assessFoundationImpact(patch)` 评估的是**拟议**补丁——必须在 apply/upsert **之前**调用。`applyFoundationChange` 对 `rewrite_needed` 是两步确认闸门（已传 `confirmRewrite: true` 时不会再返回 `needs_confirm`）。提供的数组会整文件替换。只有 `rewriteChapters: true` 且 mode 为 `"rewrite"` | `"polish"` 才会重写章节。怎么用：[指南 §7.2a–e](guide.zh-CN.md#scenario-session-impact) · [§8.1](guide.zh-CN.md#scenario-session-worker-impact)。常见坑：[指南](guide.zh-CN.md#pitfalls)。`chapter.write` 是专用作者循环（不是 `Engine.run` / 不是 `pendingRewrites`）。Worker 里的 `LlmPort` 应 `fetch` 宿主 BFF。
 
 示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)（同线程）· [`examples/session-host.ts`](../examples/session-host.ts)（Worker）。
+
+<a id="optional-novelkit-novel-enginekit"></a>
+
+## 可选 NovelKit（`novel-engine/kit`）
+
+不属于 `.`、`./worker`、`./llm` 或 `./session`。开箱门面：**只有 `NovelKit.create`**。默认 `store: "opfs"` + `runtime: "worker"`。宿主从包装箱拿到现成 Worker（`dist/novel-kit.worker.js`）。怎么用：[guide-kit](guide-kit.zh-CN.md)（[English](guide-kit.md)）。Init 握手：[架构](architecture.zh-CN.md#kit-worker-init)。Session 仍是参考 API。
+
+| 导出 | 种类 | 说明 |
+| --- | --- | --- |
+| `NovelKit.create(options?)` | fn | 异步工厂。没有公开构造函数。 |
+| `NovelKit` | class | 场景方法包装 Session。只读 `bookId`、`storeKind`、`runtime`。 |
+| `NovelKitOptions` | type | `runtime`、`store`、`llm`、`llmEndpoint`、`bookId`、`workerUrl`、`workspace`、`fallbackToMemory`、`opfs`。 |
+| `KitStoreKind` / `KitRuntime` | type | `"opfs" \| "memory" \| "custom"` / `"worker" \| "main"`。 |
+| `defaultKitWorkerUrl()` | fn | `new URL("./novel-kit.worker.js", import.meta.url)`，相对 `dist/kit.js`。 |
+| `KIT_PROTOCOL` / `KIT_NS` / `isKitInitCommand` / `isKitNotice` | const / fn | Kit init 握手（`v: 1`，`ns: "kit"`）。与 Session 分开。 |
+| `attachKitWorker(port)` | fn | Worker 侧 init + 挂上 session（也是随包装箱发布的 Worker 入口）。 |
+| `KitLlmRequiredError` | class | `runtime: "main"` 却没传 `llm`。 |
+| `KitWorkerError` | class | 没有 `Worker`、Worker 模式用了自定义 store、init 超时。 |
+| `KitWorkspaceDisabledError` | class | `workspace: false` 或自定义 `StorePort` 时调用多书方法。 |
+| `KitClosedError` | class | `dispose()` 之后再调用。 |
+
+`runtime: "main"` 必须传 `llm`；Worker 模式下可选（Worker 用 `llmEndpoint`；两个都传时 Worker 仍用 `llmEndpoint`）。`bookId` 默认 `"default"`。没有 OPFS 且 `fallbackToMemory` 为 true（默认）时回落到 `MemoryStore`。
+
+示意：[`examples/kit-host.ts`](../examples/kit-host.ts)。
 
 ## Worker 宿主
 

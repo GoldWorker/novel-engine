@@ -8,7 +8,7 @@ Reference and implementation notes for the optional host session. **Copy-paste h
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-Package version **0.4.0**. This document covers **S0–S6**.
+Package version **0.4.0** (session surface). The package is **0.5.0**; the out-of-the-box host path is [`novel-engine/kit`](guide-kit.md). This document covers **S0–S6**.
 
 ## Status
 

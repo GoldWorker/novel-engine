@@ -143,9 +143,23 @@ Notices: `result` | `event` | `error`.
 
 `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` **run in the worker** because the book `StorePort` lives there (typically OPFS). A main-thread generate/apply would write a different store.
 
-There is no Workspace-over-Worker: keep `createNovelWorkspace` on the UI thread and open one session worker per book.
+There is no Workspace-over-Worker: keep `createNovelWorkspace` on the UI thread and open one session worker per book. **Kit** (`novel-engine/kit`) does that composition for you (and ships the worker).
 
-Contracts: [session.md](session.md#s4--worker-bridge). Host how-to: [guide §8](guide.md#scenario-session-worker).
+Contracts: [session.md](session.md#s4--worker-bridge). Host how-to: [guide §8](guide.md#scenario-session-worker). Kit: [guide-kit](guide-kit.md).
+
+<a id="kit-worker-init"></a>
+
+## Kit worker init (`KIT_PROTOCOL`)
+
+`KIT_PROTOCOL === 1`, `ns: "kit"` — does not collide with Engine or Session. Used **once** before session commands.
+
+Main → worker `init`: `{ v, ns, type: "init", id, bookId, llmEndpoint, store: "opfs" | "memory", fallbackToMemory, opfsDirectory? }`.
+
+Worker → main `ready`: `{ v, ns, type: "ready", id, bookId, storeKind }` or `error`.
+
+Then the existing Session bridge (`SESSION_PROTOCOL`, `ns: "session"`) takes over. The shipped `dist/novel-kit.worker.js` calls `attachKitWorker(self)`: create store + `fetch(llmEndpoint)` `LlmPort`, `createNovelSession`, `attachSessionWorker`. No API keys in the worker. Default `workerUrl` is `new URL("./novel-kit.worker.js", import.meta.url)` next to `dist/kit.js`; copy that file to `public/` if the bundler 404s.
+
+Kit is composition + defaults. It does **not** change Session/Engine protocols.
 
 ## Busy / session lifecycle
 
@@ -197,10 +211,12 @@ Host how-to: [guide — Install](guide.md#install).
 | `./worker` | `dist/worker.js` | `dist/worker.d.ts` |
 | `./llm` | `dist/llm.js` | `dist/llm.d.ts` |
 | `./session` | `dist/session.js` | `dist/session.d.ts` |
+| `./kit` | `dist/kit.js` | `dist/kit.d.ts` |
+| `./kit/worker` | `dist/novel-kit.worker.js` | `dist/novel-kit.worker.d.ts` |
 | `./package.json` | `package.json` | — |
 
 Hosts that **copy** this tree into `vendor/novel-engine/` (etc.) import `dist/*.js` by relative path, or keep the package name with `"novel-engine": "file:./vendor/novel-engine"` after `npm install && npm run build` in the copy. `src/*.ts` is not an `exports` condition; bundlers may compile it via `tsconfig` `paths` (see the guide). Node cannot execute the TypeScript tree (`.js` specifiers in `.ts` files).
 
-`files` for `npm pack` / registry: `dist/`, `README.md`, `LICENSE` (`dist/` is gitignored — `npm run build` is required). ESM only (`"type": "module"`). `fflate` stays external so hosts resolve it from `node_modules`.
+`files` for `npm pack` / registry: `dist/`, `README.md`, `LICENSE` (`dist/` is gitignored — `npm run build` is required). ESM only (`"type": "module"`). `fflate` stays external on `.` / `./worker` / `./session` / `./kit` so hosts resolve it from `node_modules`. The shipped `./kit/worker` bundle inlines `fflate` so a `public/` copy of `novel-kit.worker.js` does not need a bare specifier inside a Dedicated Worker.
 
 

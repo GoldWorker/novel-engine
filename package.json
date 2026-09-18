@@ -1,7 +1,7 @@
 {
   "name": "novel-engine",
-  "version": "0.4.0",
-  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Engine, route, MemoryStore, OpfsStore, Worker host, book snapshot zip, optional fetch LLM adapters, and a same-thread host session (inspect, generate, ChapterRunner, foundation impact, Worker bridge).",
+  "version": "0.5.0",
+  "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Optional novel-engine/kit façade (OPFS + shipped Worker by default), Engine, route, MemoryStore, OpfsStore, Worker host, book snapshot zip, optional fetch LLM adapters, and a same-thread host session.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -29,6 +29,16 @@
       "import": "./dist/session.js",
       "default": "./dist/session.js"
     },
+    "./kit": {
+      "types": "./dist/kit.d.ts",
+      "import": "./dist/kit.js",
+      "default": "./dist/kit.js"
+    },
+    "./kit/worker": {
+      "types": "./dist/novel-kit.worker.d.ts",
+      "import": "./dist/novel-kit.worker.js",
+      "default": "./dist/novel-kit.worker.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -40,7 +50,7 @@
     "node": ">=18.17"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsup --config tsup.kit-worker.config.ts",
     "test": "vitest run",
     "test:short": "vitest run tests/engine.short-book.test.ts",
     "test:layered": "vitest run tests/engine.layered-book.test.ts",

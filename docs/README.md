@@ -2,13 +2,14 @@
 
 [English](README.md) | [中文文档](README.zh-CN.md)
 
-Host how-to lives in the **guide**. Contracts live in **API** / **Session**. Internals live in **architecture**. Runnable sketches stay in [`examples/`](../examples/).
+Host how-to lives in the **guide**. Kit is the out-of-the-box path. Contracts live in **API** / **Session**. Internals live in **architecture**. Runnable sketches stay in [`examples/`](../examples/).
 
 ## Usage
 
 | Doc | For |
 | --- | --- |
-| [Host guide](guide.md) | Install (vendor copy + relative `dist/` imports, or registry) and copy-paste host flows |
+| [NovelKit](guide-kit.md) | Out-of-the-box `novel-engine/kit` (`NovelKit.create`, shipped worker, OPFS + Worker defaults) |
+| [Host guide](guide.md) | Install (vendor copy + relative `dist/` imports, or registry) and copy-paste Engine / Session flows |
 | [LLM adapters](llm-adapters.md) | Optional `novel-engine/llm` factories, mapping, BFF security |
 
 Root [README](../README.md) is the product entry and scenario hub. It points here instead of duplicating internals.
@@ -17,7 +18,7 @@ Root [README](../README.md) is the product entry and scenario hub. It points her
 
 | Doc | For |
 | --- | --- |
-| [Public API](api.md) | Stable exports, types, constants (`.` / `./worker` / `./llm` / `./session`) |
+| [Public API](api.md) | Stable exports, types, constants (`.` / `./worker` / `./llm` / `./session` / `./kit`) |
 | [Session API](session.md) | `novel-engine/session` method contracts, errors, S0–S6, protocol |
 
 ## Internals

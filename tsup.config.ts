@@ -6,6 +6,7 @@ export default defineConfig({
     worker: "src/worker.ts",
     llm: "src/adapters/llm/index.ts",
     session: "src/session/index.ts",
+    kit: "src/kit/index.ts",
   },
   format: ["esm"],
   dts: true,

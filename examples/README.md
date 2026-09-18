@@ -12,6 +12,7 @@ Do not duplicate the how-to here — the guide is the hub. This folder is the de
 
 | Scenario (guide) | File |
 | --- | --- |
+| [0. NovelKit (recommended)](../docs/guide-kit.md) | [`kit-host.ts`](kit-host.ts) |
 | [1. Short book to complete](../docs/guide.md#scenario-short-book) | [`short-book.ts`](short-book.ts) |
 | [2. Layered mid / long book](../docs/guide.md#scenario-layered-book) | [`layered-book.ts`](layered-book.ts) |
 | [3. Persist in the browser (OPFS)](../docs/guide.md#scenario-opfs) | [`opfs-store.ts`](opfs-store.ts) |

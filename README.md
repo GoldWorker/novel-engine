@@ -2,11 +2,11 @@
 
 [English](README.md) | [中文文档](README.zh-CN.md)
 
-**[Guide](docs/guide.md)** · **[API](docs/api.md)** · **[Session](docs/session.md)** · **[Architecture](docs/architecture.md)** · [中文](README.zh-CN.md)
+**[Guide](docs/guide.md)** · **[Kit](docs/guide-kit.md)** · **[API](docs/api.md)** · **[Session](docs/session.md)** · **[Architecture](docs/architecture.md)** · [中文](README.zh-CN.md)
 
 Reusable **TypeScript** Novel Engine SDK for hosts that want to generate novels in the browser (or Node tests). Pure ESM, no UI, no React bindings, no TUI.
 
-**0.4.0** adds Session **S5/S6** (`assessFoundationImpact` / `applyFoundationChange`) on the optional `novel-engine/session` entry, and keeps `novel-engine/llm` (fetch adapters for OpenAI, Anthropic, DashScope). Default bundles still ship no vendor clients and do not pull session.
+**0.5.0** adds optional **`novel-engine/kit`**: `NovelKit.create` only (no `new` + `init`), defaults **OPFS + Worker**, and a **shipped** `dist/novel-kit.worker.js` so hosts do not maintain worker source. Session (`novel-engine/session`) remains the reference API. Default `.` / `./worker` / `./llm` bundles still ship no vendor clients.
 
 The default `novel-engine` / `novel-engine/worker` entries never talk to a real model. `src/` never uses `node:fs` / `node:path`.
 
@@ -17,7 +17,7 @@ Docs index: [docs/README.md](docs/README.md). Ports, `route`, and Worker protoco
 ## What's not included
 
 - Vendor LLM clients in the default `novel-engine` / `novel-engine/worker` bundles — inject `LlmPort`, or import optional [`novel-engine/llm`](docs/llm-adapters.md) (fetch adapters; **do not put API keys in a public browser app**)
-- Host session in the default bundles — import optional [`novel-engine/session`](docs/session.md) (S0–S6 inspect, generate, auto-write, ChapterRunner, foundation impact, Worker bridge, workspace)
+- Host session in the default bundles — import optional [`novel-engine/kit`](docs/guide-kit.md) (out-of-the-box façade) or [`novel-engine/session`](docs/session.md) (S0–S6 inspect, generate, auto-write, ChapterRunner, foundation impact, Worker bridge, workspace)
 - React package, Demo SPA, or any visual app
 - Arbiter full semantic scenes (`plan_start` is a keyword stub)
 - ChapterAdvanceGate review-mode UI
@@ -31,6 +31,7 @@ Docs index: [docs/README.md](docs/README.md). Ports, `route`, and Worker protoco
 // from my-app/src/lib/engine.ts
 import { createEngine, MemoryStore } from "../../vendor/novel-engine/dist/index.js";
 import { createNovelSession } from "../../vendor/novel-engine/dist/session.js";
+import { NovelKit } from "../../vendor/novel-engine/dist/kit.js";
 import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js";
 import { createOpenAiLlm } from "../../vendor/novel-engine/dist/llm.js";
 ```
@@ -51,6 +52,8 @@ Package exports:
 | `./worker` | `novel-engine/worker` | `attachEngineWorker` + Engine/stores for a dedicated worker |
 | `./llm` | `novel-engine/llm` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope) |
 | `./session` | `novel-engine/session` | Optional same-thread host session + Worker session bridge |
+| `./kit` | `novel-engine/kit` | Out-of-the-box `NovelKit.create` (defaults OPFS + Worker) |
+| `./kit/worker` | `novel-engine/kit/worker` | Shipped kit worker (`dist/novel-kit.worker.js`) |
 
 Published `files`: `dist/`, `README.md`, `LICENSE`.
 
@@ -60,6 +63,7 @@ Host how-to (copy-paste snippets, including audited Session **7.2a–e** / **8.1
 
 | Scenario | When to use | Guide | Canonical source |
 | --- | --- | --- | --- |
+| 0. **NovelKit (recommended)** | Browser workbench: OPFS + shipped Worker; Node/tests: `runtime: "main"` + `store: "memory"` | [kit](docs/guide-kit.md) | [`kit-host.ts`](examples/kit-host.ts) |
 | 1. Short book to complete | Same-thread mock of a 3-chapter book through `phase=complete` | [§1](docs/guide.md#scenario-short-book) | [`short-book.ts`](examples/short-book.ts) |
 | 2. Layered mid / long book | Volume/arc outline, arc-end review → `expand_next_arc` | [§2](docs/guide.md#scenario-layered-book) | [`layered-book.ts`](examples/layered-book.ts) |
 | 3. Persist in the browser (OPFS) | Keep artifacts across reloads | [§3](docs/guide.md#scenario-opfs) | [`opfs-store.ts`](examples/opfs-store.ts) |
@@ -96,9 +100,10 @@ import {
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
+import { NovelKit } from "novel-engine/kit";
 ```
 
-Stable surface: [docs/api.md](docs/api.md). Session contracts: [docs/session.md](docs/session.md).
+Stable surface: [docs/api.md](docs/api.md). Kit how-to: [docs/guide-kit.md](docs/guide-kit.md). Session contracts: [docs/session.md](docs/session.md).
 
 ## Develop / test
 
