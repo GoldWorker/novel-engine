@@ -250,7 +250,7 @@ await session.chapter.write({ chapter: 1, mode: "create" });
 | `createSessionClient(port, { bookId })` | 主线程 `NovelSession`。`bookId` 必须与 Worker 侧 session 一致。 |
 | 协议 | `SESSION_PROTOCOL === 1`，`ns: "session"`（不与 Engine 的 `v: 1` 命令冲突）。S5/S6 增量命令：`assessFoundationImpact` / `applyFoundationChange`。命令 → `result` / `event` / `error`。 |
 | Busy | Worker 侧 `SessionBusyError`：`startAutoWrite` / `applyFoundationChange` 进行中会挡住跨桥的 `chapter.write`。 |
-| `generateFoundation` | **在 Worker 里跑**（不在 UI 线程），因为书的 `StorePort` 在那边（通常是 OPFS）。主线程 generate 会写到另一份 store。 |
+| `generateFoundation` / S5–S6 | **在 Worker 里跑**（不在 UI 线程），因为书的 `StorePort` 在那边（通常是 OPFS）。主线程 generate/apply 会写到另一份 store。 |
 | `LlmPort` | `fetch` 宿主 BFF。**不要把供应商 API Key 打进公开 Worker 包**。本包不含 Next.js 代码。 |
 | 事件 | Worker 转发 `subscribe` 事件（`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`）。 |
 
@@ -310,6 +310,21 @@ if (outcome.status === "needs_confirm") {
 | `refineWithLlm` | 转给 S5。 |
 
 `meta_only` / `forward_only` 无需确认即可 apply。指纹文件仍会经 `upsertFoundation` 作废 `foundation_audit`。与 `startAutoWrite` / `chapter.write` 共用 busy 标志。
+
+### 宿主场景（可复制片段）
+
+怎么用写在根 README，风格与 Session 7.1–7.6 相同：
+
+| 任务 | README |
+| --- | --- |
+| 只评估（不写盘） | [§7.2a](../README.zh-CN.md#scenario-session-impact-assess) |
+| 仅元信息 apply（标题/标签/简介） | [§7.2b](../README.zh-CN.md#scenario-session-impact-meta) |
+| 只影响后续（未来大纲） | [§7.2c](../README.zh-CN.md#scenario-session-impact-forward) |
+| `rewrite_needed` + `needs_confirm` 闸门 | [§7.2d](../README.zh-CN.md#scenario-session-impact-confirm) |
+| 确认后批量 `chapter.write` | [§7.2e](../README.zh-CN.md#scenario-session-impact-batch) |
+| `createSessionClient` 上的同样流程 | [§8.1](../README.zh-CN.md#scenario-session-worker-impact) |
+
+示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts) · Worker：[`examples/session-host.ts`](../examples/session-host.ts)。
 
 ## 错误
 

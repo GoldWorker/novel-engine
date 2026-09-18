@@ -139,7 +139,7 @@ tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放�
 
 ## 可选宿主 Session（`novel-engine/session`）
 
-不属于 `.`、`./worker` 或 `./llm`。同线程检查、S2 生成/upsert/自动写作、S3 ChapterRunner、S4 Worker 桥、S5/S6 基础设定影响，以及多书工作区。指南：[session.zh-CN.md](session.zh-CN.md)（[English](session.md)）。场景：[README §7](../README.zh-CN.md#scenario-session) · [README §8](../README.zh-CN.md#scenario-session-worker)。
+不属于 `.`、`./worker` 或 `./llm`。同线程检查、S2 生成/upsert/自动写作、S3 ChapterRunner、S4 Worker 桥、S5/S6 基础设定影响，以及多书工作区。指南：[session.zh-CN.md](session.zh-CN.md)（[English](session.md)）。场景：[README §7](../README.zh-CN.md#scenario-session)（[只评估](../README.zh-CN.md#scenario-session-impact-assess) · [仅元信息](../README.zh-CN.md#scenario-session-impact-meta) · [只影响后续](../README.zh-CN.md#scenario-session-impact-forward) · [确认闸门](../README.zh-CN.md#scenario-session-impact-confirm) · [批量改写](../README.zh-CN.md#scenario-session-impact-batch)）· [README §8.1](../README.zh-CN.md#scenario-session-worker-impact)。
 
 | 导出 | 种类 | 说明 |
 | --- | --- | --- |
@@ -161,7 +161,7 @@ tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放�
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | 已关闭的 session/工作区；未知 `bookId`。 |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`。 |
 
-`generateFoundation` 要求 `LlmPort.complete` 在 **`text` 里返回 JSON**（不新增 tools）。走 Worker 桥时它在 **Worker 里**跑（书的 store 在那边）。默认 `fill_missing` 只 upsert 仍缺的键。`assessFoundationImpact` 规则优先且不得写盘。`applyFoundationChange` 对 `rewrite_needed` 做确认后再 upsert；只有 `rewriteChapters: true` 才会重写章节。`chapter.write` 是专用作者循环（MockLlm 用 `toolCalls`）；不跑 `Engine.run`，也不驱动 `pendingRewrites`。Worker 里的 `LlmPort` 应 `fetch` 宿主 BFF——**不要内嵌供应商密钥**。
+`generateFoundation` 要求 `LlmPort.complete` 在 **`text` 里返回 JSON**（不新增 tools）。走 Worker 桥时它在 **Worker 里**跑（书的 store 在那边）。默认 `fill_missing` 只 upsert 仍缺的键。`assessFoundationImpact` 规则优先且不得写盘。`applyFoundationChange` 对 `rewrite_needed` 做确认后再 upsert；只有 `rewriteChapters: true` 才会重写章节。宿主怎么用：[README §7.2a–7.2e](../README.zh-CN.md#scenario-session-impact) · [§8.1](../README.zh-CN.md#scenario-session-worker-impact)。`chapter.write` 是专用作者循环（MockLlm 用 `toolCalls`）；不跑 `Engine.run`，也不驱动 `pendingRewrites`。Worker 里的 `LlmPort` 应 `fetch` 宿主 BFF——**不要内嵌供应商密钥**。
 
 示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)（同线程）· [`examples/session-host.ts`](../examples/session-host.ts)（Worker）。
 

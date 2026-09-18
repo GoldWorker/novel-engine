@@ -12,7 +12,7 @@
 
 稳定导出见 [docs/api.zh-CN.md](docs/api.zh-CN.md)（[English API](docs/api.md)）。Session：[docs/session.zh-CN.md](docs/session.zh-CN.md)。
 
-**怎么用？** 先看 [使用场景](#使用场景) — [短篇完结](#scenario-short-book) · [分层中长篇](#scenario-layered-book) · [浏览器持久化](#scenario-opfs) · [Web Worker](#scenario-worker) · [书稿快照](#scenario-snapshot) · [真实 LLM 适配器](#scenario-llm) · [宿主 Session](#scenario-session)（[缺口检查](#scenario-session-gaps) · [基础设定](#scenario-session-foundation) · [基础设定影响](#scenario-session-impact) · [单章写作](#scenario-session-chapter) · [读元信息](#scenario-session-read) · [目录与章节](#scenario-session-toc) · [切书恢复](#scenario-session-workspace)）· [Worker 上的 Session](#scenario-session-worker)。可跑通的源码在 [`examples/`](examples/)。
+**怎么用？** 先看 [使用场景](#使用场景) — [短篇完结](#scenario-short-book) · [分层中长篇](#scenario-layered-book) · [浏览器持久化](#scenario-opfs) · [Web Worker](#scenario-worker) · [书稿快照](#scenario-snapshot) · [真实 LLM 适配器](#scenario-llm) · [宿主 Session](#scenario-session)（[缺口检查](#scenario-session-gaps) · [基础设定](#scenario-session-foundation) · [基础设定影响](#scenario-session-impact)（[只评估](#scenario-session-impact-assess) · [仅元信息](#scenario-session-impact-meta) · [只影响后续](#scenario-session-impact-forward) · [确认闸门](#scenario-session-impact-confirm) · [批量改写](#scenario-session-impact-batch)）· [单章写作](#scenario-session-chapter) · [读元信息](#scenario-session-read) · [目录与章节](#scenario-session-toc) · [切书恢复](#scenario-session-workspace)）· [Worker 上的 Session](#scenario-session-worker)（[评估 / 应用](#scenario-session-worker-impact)）。可跑通的源码在 [`examples/`](examples/)。
 
 ## 不包含什么
 
@@ -75,8 +75,8 @@ npm install novel-engine
 | [4. 嵌入 Web Worker](#scenario-worker) | 专用 Worker + 主线程 client：`start` / `steer` / `pause` / `resume` / `snapshot`。 | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. 书稿快照导入导出](#scenario-snapshot) | 把 store 中每个路径打成 zip（fflate），再 merge 进另一个 `StorePort`。 | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. 注入真实 LLM](#scenario-llm) | 宿主侧通过可选的 `novel-engine/llm` 得到 OpenAI / Anthropic / DashScope 的 `LlmPort`。密钥放在 BFF。 | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
-| [7. 宿主 Session（检查 + 生成 + ChapterRunner + 影响评估 + 工作区）](#scenario-session) | 同线程 `NovelSession` / `NovelWorkspace`：[缺口检查](#scenario-session-gaps)、[设定 upsert/生成](#scenario-session-foundation)、[评估 / 应用基础设定变更](#scenario-session-impact)、[单章写作](#scenario-session-chapter)、[读最新元信息](#scenario-session-read)、[目录与章节](#scenario-session-toc)、[切书 / 恢复](#scenario-session-workspace)。 | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
-| [8. Worker 上的 Session](#scenario-session-worker) | 工作台：把 `startAutoWrite` / `chapter.write` 移出 UI 线程。`createSessionClient` + `attachSessionWorker`。`LlmPort` fetch BFF——Worker 里不放供应商密钥。 | [`session.worker.ts`](examples/session.worker.ts) + [`session-host.ts`](examples/session-host.ts) |
+| [7. 宿主 Session（检查 + 生成 + ChapterRunner + 影响评估 + 工作区）](#scenario-session) | 同线程 `NovelSession` / `NovelWorkspace`：[缺口检查](#scenario-session-gaps)、[设定 upsert/生成](#scenario-session-foundation)、[中途改设定](#scenario-session-impact)（[只评估](#scenario-session-impact-assess) · [仅元信息](#scenario-session-impact-meta) · [只影响后续](#scenario-session-impact-forward) · [确认闸门](#scenario-session-impact-confirm) · [批量改写](#scenario-session-impact-batch)）、[单章写作](#scenario-session-chapter)、[读最新元信息](#scenario-session-read)、[目录与章节](#scenario-session-toc)、[切书 / 恢复](#scenario-session-workspace)。 | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
+| [8. Worker 上的 Session](#scenario-session-worker) | 工作台：把 `startAutoWrite` / `chapter.write` / `assessFoundationImpact` / `applyFoundationChange` 移出 UI 线程。[跨桥评估 + 应用](#scenario-session-worker-impact)。`createSessionClient` + `attachSessionWorker`。`LlmPort` fetch BFF——Worker 里不放供应商密钥。 | [`session.worker.ts`](examples/session.worker.ts) + [`session-host.ts`](examples/session-host.ts) |
 
 `plan_start` 是**确定性桩**（无 Arbiter LLM）：提示词含 `长篇` 则选 `architect_long` / `long`；含 `中篇` 或 `分层` 则选 `architect_long` / `mid`；否则 `architect_short` / `short`。Worker 失败会重试一次，然后暂停。同一条 Route 指令连续五次也会暂停（死锁上限）。
 
@@ -334,7 +334,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 ### 7. 宿主 Session（`novel-engine/session`）
 
-**何时：** 同线程宿主想检查一份 store 是否写得动，用结构化 LLM JSON 补齐基础设定，单章写作或重写，或在多本书之间切换。
+**何时：** 同线程宿主想检查一份 store 是否写得动，用结构化 LLM JSON 补齐基础设定，写作中途改设定（评估 → 确认 → 应用），单章写作或重写，或在多本书之间切换。
 
 可选子路径。S0–S6：`getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / 工作区 `createBook` / `switchTo`。中长篇只要有有效的 `layered_outline.json`，不再需要扁平 `outline.json`。`generateFoundation` 是 **`LlmPort.complete().text` 里的一次性 JSON**，不是 Engine 循环。`chapter.write` 是**专用作者循环**（复用 writer 工具；不是 `Engine.run` / 不是 `pendingRewrites`）。`assessFoundationImpact` **规则优先**且不写盘。`applyFoundationChange` 除非 `rewriteChapters: true`，否则绝不自动重写章节。`startAutoWrite`、`chapter.write` 与 `applyFoundationChange` 共用 busy 标志（`SessionBusyError`）。离主线程：见 [场景 8](#scenario-session-worker)。
 
@@ -401,31 +401,178 @@ await session.startAutoWrite({
 });
 ```
 
-指纹文件变更会作废 `foundation_audit`。中长篇可用 `layeredOutline` 代替扁平 `outline`。写作中途随时可以 upsert/generate 基础设定；章节**不会**自动重写——先评估（[7.2a](#scenario-session-impact)）。
+指纹文件变更会作废 `foundation_audit`。中长篇可用 `layeredOutline` 代替扁平 `outline`。写作中途随时可以 upsert/generate 基础设定；章节**不会**自动重写——先走 [7.2a–7.2e](#scenario-session-impact)，再动终稿。
 
 <a id="scenario-session-impact"></a>
 
-#### 7.2a 评估基础设定影响，再带确认闸门应用
+#### 7.2a–7.2e 中途改基础设定（先评估再应用）
 
-中途改设定后，重写章节前先调用 `assessFoundationImpact`。启发式是确定性的（`meta_only` / `forward_only` / `rewrite_needed`）。可选 `refineWithLlm` 使用 `complete().text` 里的 JSON（测试用 `MockLlm`）。该调用是纯评估：不写 store，也不改章节。
+宿主 UI 应**先评估**，再决定是否 apply、是否确认改写，以及（另一步）是否同步章节。启发式是确定性的（`meta_only` / `forward_only` / `rewrite_needed`）。可选 `refineWithLlm` 使用 `complete().text` 里的 JSON（测试用 `MockLlm`）。示意：[`examples/session-workspace.ts`](examples/session-workspace.ts)。Worker 上的同样调用见 [8.1](#scenario-session-worker-impact)。
 
-`applyFoundationChange` 编排：评估 → 确认闸门（`rewrite_needed` 在未 `confirmRewrite: true` 时返回 `needs_confirm`）→ `upsertFoundation` → 当 `rewriteChapters: true` 时可选顺序 `chapter.write`（默认 **false**）。
+| 任务 | 常见严重度 | 会改写章节吗？ |
+| --- | --- | --- |
+| [7.2a 只评估](#scenario-session-impact-assess) | 任意 | **不会** — 评估不写盘 |
+| [7.2b 仅元信息 apply](#scenario-session-impact-meta) | `meta_only` | 否（`suggestedMode: "none"`） |
+| [7.2c 只影响后续 apply](#scenario-session-impact-forward) | `forward_only` | 否（尚未写下的后续章） |
+| [7.2d 确认闸门](#scenario-session-impact-confirm) | `rewrite_needed` | 确认前否；确认后仍否，除非走 [7.2e](#scenario-session-impact-batch) |
+| [7.2e 批量同步章节](#scenario-session-impact-batch) | `rewrite_needed` | 仅当 `rewriteChapters: true` |
+
+<a id="scenario-session-impact-assess"></a>
+
+#### 7.2a 只评估（不写盘）
+
+改设定**之前**调用 `assessFoundationImpact`。读取 `severity` / `suggestedChapters` / `suggestedMode` / `reasons`，在宿主 UI 里做决定。该调用是纯评估：store 与章节终稿都不变。
 
 ```ts
-const assessment = await session.assessFoundationImpact({
-  characters: [{ name: "林深", role: "主角" }],
+const patch = {
+  characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
+};
+
+const assessment = await session.assessFoundationImpact(patch);
+assessment.severity;          // "meta_only" | "forward_only" | "rewrite_needed"
+assessment.suggestedChapters; // 如 [] 或 [1, 2]
+assessment.suggestedMode;     // "none" | "polish" | "rewrite"
+assessment.reasons;           // 给宿主 UI 的中英短句
+assessment.notes;
+assessment.changedKeys;       // 如 ["characters"]
+
+// 在 UI 里决定——此时不要 upsert，也不要改写章节：
+if (assessment.severity === "rewrite_needed") {
+  // 展示 assessment.reasons + suggestedChapters，等用户确认
+} else {
+  // meta_only / forward_only 无需改写确认即可 apply
+}
+```
+
+这里的 `llm` 可选。只有需要 MockLlm/BFF JSON 精炼时才传 `{ refineWithLlm: true }`；启发式仍然给出严重度下限。
+
+<a id="scenario-session-impact-meta"></a>
+
+#### 7.2b 仅元信息 apply（标题 / 标签 / 简介）
+
+对 `meta/book.json` 的标题或简介类修改，评估为 `meta_only`。应用补丁，**不要**改写章节。
+
+```ts
+const patch = {
+  book: { title: "无主的信（修订）", synopsis: "灯塔与潮的简介改写，不改情节。" },
+};
+
+const assessment = await session.assessFoundationImpact(patch);
+// assessment.severity === "meta_only"
+// assessment.suggestedMode === "none"
+// assessment.suggestedChapters === []
+
+const outcome = await session.applyFoundationChange({
+  patch,
+  rewriteChapters: false, // 默认；标题/标签不得改写章节
 });
-// assessment.severity / suggestedChapters / suggestedMode / reasons
+// outcome.status === "applied"
+// 已写章节终稿不变；foundation.book.title 已是新标题
+```
+
+`meta_only` 不需要 `confirmRewrite`。
+
+<a id="scenario-session-impact-forward"></a>
+
+#### 7.2c 只影响后续（未来大纲 / 新角色）
+
+主要落在**未写**后续章的变更，评估为 `forward_only`。已写终稿不动；`suggestedMode` 为 `none`。只 apply 设定——不 rewrite，也不 polish。
+
+```ts
+const patch = {
+  outline: [
+    { chapter: 1, title: "风暴之后", summary: "林守在礁石缝里捡到那封信。" },
+    { chapter: 2, title: "岸边的地址", summary: "按地址找到一座空屋。" },
+    { chapter: 3, title: "回信", summary: "把守夜写进回信，放回海里。" },
+    { chapter: 4, title: "灯塔之外", summary: "尚未写下的后续。" },
+  ],
+  characters: [
+    { name: "林守", role: "主角" },
+    { name: "潮", role: "未出场", bio: "只在后续出现。" },
+  ],
+};
+
+const assessment = await session.assessFoundationImpact(patch);
+// assessment.severity === "forward_only"
+// assessment.suggestedChapters === []
+// assessment.suggestedMode === "none"
+
+const outcome = await session.applyFoundationChange({
+  patch,
+  rewriteChapters: false, // 未写的章没有可改写的终稿
+});
+// outcome.status === "applied" — 大纲/角色已更新；chapters/01.md 不变
+```
+
+已写章节的大纲行请保持原样，启发式才会停在 `forward_only`。改**已写**章的情节属于 [7.2d](#scenario-session-impact-confirm)。
+
+<a id="scenario-session-impact-confirm"></a>
+
+#### 7.2d 需要改写 + 确认闸门
+
+角色 / 世界 / 已写情节与终稿矛盾时，评估为 `rewrite_needed`。默认闸门下，未传 `confirmRewrite: true` 时 `applyFoundationChange` **不写盘**。UI 确认后再用同一补丁重试。
+
+```ts
+const patch = {
+  premise: "林深从未离开灯塔。",
+  characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
+};
+
+const gated = await session.applyFoundationChange({ patch });
+if (gated.status === "needs_confirm") {
+  // gated.assessment.severity === "rewrite_needed"
+  // gated.assessment.suggestedChapters — 如 [1, 2]
+  // gated.assessment.suggestedMode === "rewrite"
+  // 用 gated.assessment.reasons 提示 UI — store 仍未改
+}
+
+const applied = await session.applyFoundationChange({
+  patch,
+  confirmRewrite: true,    // 宿主已确认影响范围
+  rewriteChapters: false,  // 仍然不会自动改写章节（见 7.2e）
+});
+// applied.status === "applied"
+// 设定已更新；章节终稿仍是改设定前的文本
+```
+
+关掉闸门（`requireConfirmRewrite: false`）只适合测试/工具——工作台 UI 应保持默认，并展示 `needs_confirm`。
+
+<a id="scenario-session-impact-batch"></a>
+
+#### 7.2e 批量同步章节（`rewriteChapters: true`）
+
+确认之后，章节**仍然**不会改写，除非宿主显式传入 `rewriteChapters: true`。Session 随后按 `suggestedChapters` 顺序调用 `chapter.write`（`rewrite` 或 `polish`）。需要 `llm`（MockLlm 的 `toolCalls`，与 [7.3](#scenario-session-chapter) 相同）。
+
+```ts
+import { MemoryStore, MockLlm } from "novel-engine";
+
+const llm = new MockLlm([
+  // 每个建议章一轮作者循环（toolCalls，不是 Engine.run）
+  {
+    text: "write",
+    toolCalls: [
+      { id: "plan-1", name: "plan_chapter", arguments: { chapter: 1, title: "风暴之后", goal: "g", conflict: "c", hook: "h" } },
+      { id: "draft-1", name: "draft_chapter", arguments: { chapter: 1, content: "重写：林深守着灯塔。", mode: "write" } },
+      { id: "commit-1", name: "commit_chapter", arguments: { chapter: 1 } },
+    ],
+  },
+  { text: "done" },
+]);
+
+const session = await createNovelSession({ store, llm, bookId: "letter" });
 
 const outcome = await session.applyFoundationChange({
   patch: { characters: [{ name: "林深", role: "主角" }] },
-  confirmRewrite: true,    // severity 为 rewrite_needed 时需要
-  rewriteChapters: false,  // 宿主显式选择；章节不会自动重写
+  confirmRewrite: true,
+  rewriteChapters: true, // 宿主显式选择——绝不是默认
+  instruction: "按新设定对齐本章",
 });
-if (outcome.status === "needs_confirm") {
-  // 展示 outcome.assessment.reasons，再带 confirmRewrite: true 重试
-}
+// outcome.status === "applied"
+// outcome.writes.map((row) => row.chapter)  // 顺序即 suggestedChapters
+// outcome.writes.every((row) => row.mode === "rewrite")
 ```
+
+省略 `rewriteChapters`（或传 `false`）则只更新设定。不走 `pendingRewrites`。
 
 <a id="scenario-session-chapter"></a>
 
@@ -563,9 +710,9 @@ await sessionA.getProgress();
 
 ### 8. Worker 上的 Session（`createSessionClient`）
 
-**何时：** 工作台 UI 不能被自动写作 / 章节操作堵住，并且供应商 API Key 必须留在 BFF。
+**何时：** 工作台 UI 不能被自动写作 / 章节操作 / 应用设定堵住，并且供应商 API Key 必须留在 BFF。
 
-从 `novel-engine/session` 导入 `attachSessionWorker`（不要从 `novel-engine/worker`）。Worker 持有同线程 `NovelSession` + OPFS store；主线程用 `createSessionClient`。`LlmPort.complete` 应 `fetch("/api/llm")`——**不要把 API Key 放进 Worker 包**。`generateFoundation` 在 Worker 里跑，因为 store 在那边。
+从 `novel-engine/session` 导入 `attachSessionWorker`（不要从 `novel-engine/worker`）。Worker 持有同线程 `NovelSession` + OPFS store；主线程用 `createSessionClient`。`LlmPort.complete` 应 `fetch("/api/llm")`——**不要把 API Key 放进 Worker 包**。`generateFoundation`、`assessFoundationImpact`、`applyFoundationChange` 都在 Worker 里跑，因为 store 在那边。
 
 详情：[docs/session.zh-CN.md](docs/session.zh-CN.md#s4--worker-桥)。配对：[`examples/session.worker.ts`](examples/session.worker.ts) + [`examples/session-host.ts`](examples/session-host.ts)。
 
@@ -576,9 +723,34 @@ const worker = new Worker(new URL("./session.worker.ts", import.meta.url), { typ
 const session = createSessionClient(worker, { bookId: "letter" });
 await session.inspectFoundation({ prompt: "写一本三章短篇" });
 await session.startAutoWrite({ prompt: "……", generateMissing: true });
-await session.assessFoundationImpact({ book: { title: "无主的信", synopsis: "……" } });
 await session.chapter.write({ chapter: 1, mode: "create" });
 ```
+
+<a id="scenario-session-worker-impact"></a>
+
+#### 8.1 跨 Worker 桥评估 + 应用
+
+与 [7.2a–7.2e](#scenario-session-impact) 相同：client 仍是 `NovelSession`。增量协议命令（`SESSION_PROTOCOL === 1`）：`assessFoundationImpact` / `applyFoundationChange`。确认闸门与 `rewriteChapters` 默认 **false** 在 Worker 里执行。
+
+```ts
+const patch = { characters: [{ name: "林深", role: "主角" }] };
+
+const assessment = await session.assessFoundationImpact(patch);
+// assessment.severity / suggestedChapters / suggestedMode / reasons — UI 线程，不写盘
+
+if (assessment.severity === "rewrite_needed") {
+  const gated = await session.applyFoundationChange({ patch });
+  // gated.status === "needs_confirm"，直到宿主带确认重试
+}
+
+const outcome = await session.applyFoundationChange({
+  patch,
+  confirmRewrite: assessment.severity === "rewrite_needed",
+  rewriteChapters: false, // Worker 上同样要宿主显式选择；绝不自动改写
+});
+```
+
+Busy（`SessionBusyError`）是 Worker 侧 session 标志：进行中的 `applyFoundationChange` 会挡住跨桥的 `chapter.write`。
 
 ## `route` 如何决策
 

@@ -12,7 +12,7 @@
 
 ### Documentation
 
-- `docs/session.md` / `docs/session.zh-CN.md` cover S5–S6. Root README scenarios and `docs/api.md` list the new methods. Package version **0.4.0**.
+- Root README **§7.2a–7.2e** copy-pasteable mid-story foundation-change scenarios (assess only, meta-only, forward-only, `needs_confirm` gate, batch `rewriteChapters`) plus **§8.1** Worker assess/apply. `docs/session.md` / `docs/api.md` and ZH counterparts point at those scenarios. Package version **0.4.0**.
 
 ## 0.3.0 — 2026-09-17
 

@@ -139,7 +139,7 @@ Sketch: [`examples/llm-openai.ts`](../examples/llm-openai.ts).
 
 ## Optional host session (`novel-engine/session`)
 
-Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, S3 ChapterRunner, S4 Worker bridge, S5/S6 foundation impact, and multi-book workspace. Guide: [session.md](session.md) ([中文](session.zh-CN.md)). Scenario: [README §7](../README.md#scenario-session) · [README §8](../README.md#scenario-session-worker).
+Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, S3 ChapterRunner, S4 Worker bridge, S5/S6 foundation impact, and multi-book workspace. Guide: [session.md](session.md) ([中文](session.zh-CN.md)). Scenarios: [README §7](../README.md#scenario-session) ([assess only](../README.md#scenario-session-impact-assess) · [meta-only](../README.md#scenario-session-impact-meta) · [forward-only](../README.md#scenario-session-impact-forward) · [confirm gate](../README.md#scenario-session-impact-confirm) · [batch rewrite](../README.md#scenario-session-impact-batch)) · [README §8.1](../README.md#scenario-session-worker-impact).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -161,7 +161,7 @@ Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | Closed session/workspace; unknown `bookId`. |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`. |
 
-`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). On the Worker bridge it runs **in the worker** (the book store lives there). `fill_missing` (default) only upserts keys that are still gaps. `assessFoundationImpact` is rules-first and must not mutate. `applyFoundationChange` confirms `rewrite_needed` then upserts; chapters rewrite only when `rewriteChapters: true`. `chapter.write` is a dedicated writer loop (MockLlm `toolCalls`); it does not run `Engine.run` or drive `pendingRewrites`. Worker `LlmPort` should `fetch` a host BFF — **do not embed vendor keys**.
+`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). On the Worker bridge it runs **in the worker** (the book store lives there). `fill_missing` (default) only upserts keys that are still gaps. `assessFoundationImpact` is rules-first and must not mutate. `applyFoundationChange` confirms `rewrite_needed` then upserts; chapters rewrite only when `rewriteChapters: true`. Host how-to: [README §7.2a–7.2e](../README.md#scenario-session-impact) · [§8.1](../README.md#scenario-session-worker-impact). `chapter.write` is a dedicated writer loop (MockLlm `toolCalls`); it does not run `Engine.run` or drive `pendingRewrites`. Worker `LlmPort` should `fetch` a host BFF — **do not embed vendor keys**.
 
 Sketches: [`examples/session-workspace.ts`](../examples/session-workspace.ts) (same-thread) · [`examples/session-host.ts`](../examples/session-host.ts) (Worker).
 

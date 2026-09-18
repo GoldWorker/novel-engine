@@ -12,7 +12,7 @@ Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/
 
 Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)). Session: [docs/session.md](docs/session.md).
 
-**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm) · [host session](#scenario-session) ([gaps](#scenario-session-gaps) · [foundation](#scenario-session-foundation) · [foundation impact](#scenario-session-impact) · [chapter write](#scenario-session-chapter) · [read meta](#scenario-session-read) · [TOC & chapters](#scenario-session-toc) · [switch books](#scenario-session-workspace)) · [session over Worker](#scenario-session-worker). Runnable sources stay in [`examples/`](examples/).
+**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm) · [host session](#scenario-session) ([gaps](#scenario-session-gaps) · [foundation](#scenario-session-foundation) · [foundation impact](#scenario-session-impact) ([assess only](#scenario-session-impact-assess) · [meta-only](#scenario-session-impact-meta) · [forward-only](#scenario-session-impact-forward) · [confirm gate](#scenario-session-impact-confirm) · [batch rewrite](#scenario-session-impact-batch)) · [chapter write](#scenario-session-chapter) · [read meta](#scenario-session-read) · [TOC & chapters](#scenario-session-toc) · [switch books](#scenario-session-workspace)) · [session over Worker](#scenario-session-worker) ([assess / apply](#scenario-session-worker-impact)). Runnable sources stay in [`examples/`](examples/).
 
 ## What's not included
 
@@ -75,8 +75,8 @@ Scenarios compose: the Worker example already calls `createOpfsStore()`; snapsho
 | [4. Embed in a Web Worker](#scenario-worker) | Dedicated worker + main-thread client: `start` / `steer` / `pause` / `resume` / `snapshot`. | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. Book snapshot export / import](#scenario-snapshot) | Zip every store path (fflate) and merge-restore into another `StorePort`. | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. Inject a real LLM](#scenario-llm) | Host-side OpenAI / Anthropic / DashScope `LlmPort` via optional `novel-engine/llm`. Keys belong on a BFF. | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
-| [7. Host session (inspect + generate + ChapterRunner + impact + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace`: [gap check](#scenario-session-gaps), [foundation upsert/generate](#scenario-session-foundation), [assess / apply foundation change](#scenario-session-impact), [single-chapter write](#scenario-session-chapter), [read latest meta](#scenario-session-read), [TOC & chapters](#scenario-session-toc), [switch books / restore](#scenario-session-workspace). | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
-| [8. Session over Worker](#scenario-session-worker) | Workbench: `startAutoWrite` / `chapter.write` off the UI thread. `createSessionClient` + `attachSessionWorker`. `LlmPort` fetches a BFF — no vendor keys in the worker. | [`session.worker.ts`](examples/session.worker.ts) + [`session-host.ts`](examples/session-host.ts) |
+| [7. Host session (inspect + generate + ChapterRunner + impact + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace`: [gap check](#scenario-session-gaps), [foundation upsert/generate](#scenario-session-foundation), [mid-story foundation change](#scenario-session-impact) ([assess only](#scenario-session-impact-assess) · [meta-only](#scenario-session-impact-meta) · [forward-only](#scenario-session-impact-forward) · [confirm gate](#scenario-session-impact-confirm) · [batch rewrite](#scenario-session-impact-batch)), [single-chapter write](#scenario-session-chapter), [read latest meta](#scenario-session-read), [TOC & chapters](#scenario-session-toc), [switch books / restore](#scenario-session-workspace). | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
+| [8. Session over Worker](#scenario-session-worker) | Workbench: `startAutoWrite` / `chapter.write` / `assessFoundationImpact` / `applyFoundationChange` off the UI thread. [Assess + apply over the bridge](#scenario-session-worker-impact). `createSessionClient` + `attachSessionWorker`. `LlmPort` fetches a BFF — no vendor keys in the worker. | [`session.worker.ts`](examples/session.worker.ts) + [`session-host.ts`](examples/session-host.ts) |
 
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
 
@@ -334,7 +334,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 ### 7. Host session (`novel-engine/session`)
 
-**When:** A same-thread host wants to inspect whether a store is ready to write, fill foundation via a structured LLM JSON call, write or rewrite a single chapter, or switch among several books.
+**When:** A same-thread host wants to inspect whether a store is ready to write, fill foundation via a structured LLM JSON call, change foundation mid-story (assess → confirm → apply), write or rewrite a single chapter, or switch among several books.
 
 Optional subpath. S0–S6: `getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. `generateFoundation` is **one-shot JSON in `LlmPort.complete().text`**, not an Engine loop. `chapter.write` is a **dedicated writer loop** (reuses writer tools; not `Engine.run` / not `pendingRewrites`). `assessFoundationImpact` is **rules-first** and does not mutate. `applyFoundationChange` never auto-rewrites chapters unless `rewriteChapters: true`. `startAutoWrite`, `chapter.write`, and `applyFoundationChange` share a busy flag (`SessionBusyError`). Worker off-thread: [scenario 8](#scenario-session-worker).
 
@@ -401,31 +401,178 @@ await session.startAutoWrite({
 });
 ```
 
-Fingerprint file changes invalidate `foundation_audit`. Mid/long can supply `layeredOutline` instead of flat `outline`. Mid-story foundation upsert/generate is allowed anytime; chapters do **not** auto-rewrite — assess first ([7.2a](#scenario-session-impact)).
+Fingerprint file changes invalidate `foundation_audit`. Mid/long can supply `layeredOutline` instead of flat `outline`. Mid-story foundation upsert/generate is allowed anytime; chapters do **not** auto-rewrite — walk [7.2a–7.2e](#scenario-session-impact) before touching finals.
 
 <a id="scenario-session-impact"></a>
 
-#### 7.2a Assess foundation impact, then apply with a confirm gate
+#### 7.2a–7.2e Mid-story foundation change (assess → apply)
 
-After a mid-story foundation edit, call `assessFoundationImpact` **before** rewriting. Heuristics are deterministic (`meta_only` / `forward_only` / `rewrite_needed`). Optional `refineWithLlm` uses JSON in `complete().text` (`MockLlm` in tests). The call is pure: it does not write the store or chapters.
+The host UI should **assess first**, then decide whether to apply, confirm a rewrite, and (separately) opt in to chapter sync. Heuristics are deterministic (`meta_only` / `forward_only` / `rewrite_needed`). Optional `refineWithLlm` uses JSON in `complete().text` (`MockLlm` in tests). Sketch: [`examples/session-workspace.ts`](examples/session-workspace.ts). Same calls over a Worker: [8.1](#scenario-session-worker-impact).
 
-`applyFoundationChange` orchestrates assess → confirm gate (`rewrite_needed` returns `needs_confirm` unless `confirmRewrite: true`) → `upsertFoundation` → optional sequential `chapter.write` when `rewriteChapters: true` (default **false**).
+| Job | Severity you typically see | Writes chapters? |
+| --- | --- | --- |
+| [7.2a Assess only](#scenario-session-impact-assess) | any | **Never** — assess does not mutate |
+| [7.2b Meta-only apply](#scenario-session-impact-meta) | `meta_only` | No (`suggestedMode: "none"`) |
+| [7.2c Forward-only apply](#scenario-session-impact-forward) | `forward_only` | No (unwritten future chapters) |
+| [7.2d Confirm gate](#scenario-session-impact-confirm) | `rewrite_needed` | No until the host confirms, and still no unless [7.2e](#scenario-session-impact-batch) |
+| [7.2e Batch chapter sync](#scenario-session-impact-batch) | `rewrite_needed` | Only if `rewriteChapters: true` |
+
+<a id="scenario-session-impact-assess"></a>
+
+#### 7.2a Assess only (no write)
+
+Call `assessFoundationImpact` **before** changing foundation. Read `severity` / `suggestedChapters` / `suggestedMode` / `reasons` and decide in the host UI. This call is pure: the store and chapter finals stay unchanged.
 
 ```ts
-const assessment = await session.assessFoundationImpact({
-  characters: [{ name: "林深", role: "主角" }],
+const patch = {
+  characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
+};
+
+const assessment = await session.assessFoundationImpact(patch);
+assessment.severity;          // "meta_only" | "forward_only" | "rewrite_needed"
+assessment.suggestedChapters; // e.g. [] or [1, 2]
+assessment.suggestedMode;     // "none" | "polish" | "rewrite"
+assessment.reasons;           // bilingual strings for the host UI
+assessment.notes;
+assessment.changedKeys;       // e.g. ["characters"]
+
+// Decide in the UI — do not upsert or rewrite yet:
+if (assessment.severity === "rewrite_needed") {
+  // show assessment.reasons + suggestedChapters; wait for the user
+} else {
+  // meta_only / forward_only can apply without a rewrite confirm
+}
+```
+
+`llm` is optional here. Pass `{ refineWithLlm: true }` only when you want a MockLlm/BFF JSON refine; heuristics still set a severity floor.
+
+<a id="scenario-session-impact-meta"></a>
+
+#### 7.2b Meta-only apply (title / tags / synopsis)
+
+A `meta/book.json` title or synopsis-style edit assesses as `meta_only`. Apply the patch; **do not** rewrite chapters.
+
+```ts
+const patch = {
+  book: { title: "无主的信（修订）", synopsis: "灯塔与潮的简介改写，不改情节。" },
+};
+
+const assessment = await session.assessFoundationImpact(patch);
+// assessment.severity === "meta_only"
+// assessment.suggestedMode === "none"
+// assessment.suggestedChapters === []
+
+const outcome = await session.applyFoundationChange({
+  patch,
+  rewriteChapters: false, // default; title/tags must not rewrite chapters
 });
-// assessment.severity / suggestedChapters / suggestedMode / reasons
+// outcome.status === "applied"
+// written chapter finals are unchanged; foundation.book.title is the new title
+```
+
+`confirmRewrite` is not required for `meta_only`.
+
+<a id="scenario-session-impact-forward"></a>
+
+#### 7.2c Forward-only (future outline / new characters)
+
+Changes that mainly affect **unwritten** future chapters assess as `forward_only`. Written finals stay; `suggestedMode` is `none`. Apply foundation only — no rewrite, no polish.
+
+```ts
+const patch = {
+  outline: [
+    { chapter: 1, title: "风暴之后", summary: "林守在礁石缝里捡到那封信。" },
+    { chapter: 2, title: "岸边的地址", summary: "按地址找到一座空屋。" },
+    { chapter: 3, title: "回信", summary: "把守夜写进回信，放回海里。" },
+    { chapter: 4, title: "灯塔之外", summary: "尚未写下的后续。" },
+  ],
+  characters: [
+    { name: "林守", role: "主角" },
+    { name: "潮", role: "未出场", bio: "只在后续出现。" },
+  ],
+};
+
+const assessment = await session.assessFoundationImpact(patch);
+// assessment.severity === "forward_only"
+// assessment.suggestedChapters === []
+// assessment.suggestedMode === "none"
+
+const outcome = await session.applyFoundationChange({
+  patch,
+  rewriteChapters: false, // unwritten chapters have nothing to rewrite
+});
+// outcome.status === "applied" — outline/characters updated; chapters/01.md unchanged
+```
+
+Keep existing written-chapter outline rows intact so heuristics stay `forward_only`. Changing a **written** chapter's plot in the outline is [7.2d](#scenario-session-impact-confirm) instead.
+
+<a id="scenario-session-impact-confirm"></a>
+
+#### 7.2d Rewrite needed + confirm gate
+
+Character / world / past-plot contradictions with written finals assess as `rewrite_needed`. `applyFoundationChange` **does not write** until the host passes `confirmRewrite: true` (default gate). Retry the same patch after the UI confirms.
+
+```ts
+const patch = {
+  premise: "林深从未离开灯塔。",
+  characters: [{ name: "林深", role: "主角", bio: "改名后的灯塔看守人。" }],
+};
+
+const gated = await session.applyFoundationChange({ patch });
+if (gated.status === "needs_confirm") {
+  // gated.assessment.severity === "rewrite_needed"
+  // gated.assessment.suggestedChapters — e.g. [1, 2]
+  // gated.assessment.suggestedMode === "rewrite"
+  // show gated.assessment.reasons in the UI — store is still unchanged
+}
+
+const applied = await session.applyFoundationChange({
+  patch,
+  confirmRewrite: true,    // host acknowledged the blast radius
+  rewriteChapters: false,  // still no auto chapter rewrite (see 7.2e)
+});
+// applied.status === "applied"
+// foundation updated; chapter finals still the pre-change text
+```
+
+Skipping the gate (`requireConfirmRewrite: false`) is an escape hatch for tests/tools — a workbench UI should keep the default and show `needs_confirm`.
+
+<a id="scenario-session-impact-batch"></a>
+
+#### 7.2e Batch chapter sync (`rewriteChapters: true`)
+
+After confirm, chapters **still** do not rewrite unless the host opts in with `rewriteChapters: true`. Session then sequentially `chapter.write`s `suggestedChapters` (`rewrite` or `polish`). Requires `llm` (MockLlm `toolCalls`, same as [7.3](#scenario-session-chapter)).
+
+```ts
+import { MemoryStore, MockLlm } from "novel-engine";
+
+const llm = new MockLlm([
+  // one writer loop per suggested chapter (toolCalls, not Engine.run)
+  {
+    text: "write",
+    toolCalls: [
+      { id: "plan-1", name: "plan_chapter", arguments: { chapter: 1, title: "风暴之后", goal: "g", conflict: "c", hook: "h" } },
+      { id: "draft-1", name: "draft_chapter", arguments: { chapter: 1, content: "重写：林深守着灯塔。", mode: "write" } },
+      { id: "commit-1", name: "commit_chapter", arguments: { chapter: 1 } },
+    ],
+  },
+  { text: "done" },
+]);
+
+const session = await createNovelSession({ store, llm, bookId: "letter" });
 
 const outcome = await session.applyFoundationChange({
   patch: { characters: [{ name: "林深", role: "主角" }] },
-  confirmRewrite: true,    // required when severity is rewrite_needed
-  rewriteChapters: false,  // host opt-in; chapters never auto-rewrite
+  confirmRewrite: true,
+  rewriteChapters: true, // host opt-in — never the default
+  instruction: "按新设定对齐本章",
 });
-if (outcome.status === "needs_confirm") {
-  // show outcome.assessment.reasons, then retry with confirmRewrite: true
-}
+// outcome.status === "applied"
+// outcome.writes.map((row) => row.chapter)  // sequential suggestedChapters
+// outcome.writes.every((row) => row.mode === "rewrite")
 ```
+
+Omit `rewriteChapters` (or pass `false`) to update foundation only. `pendingRewrites` is not used.
 
 <a id="scenario-session-chapter"></a>
 
@@ -563,9 +710,9 @@ Cold start with `indexStore`: `listBooks()` restores the catalog but does **not*
 
 ### 8. Session over Worker (`createSessionClient`)
 
-**When:** A workbench UI must not block on auto-write / chapter ops, and vendor API keys must stay on a BFF.
+**When:** A workbench UI must not block on auto-write / chapter ops / foundation apply, and vendor API keys must stay on a BFF.
 
-Import `attachSessionWorker` from `novel-engine/session` (not `novel-engine/worker`). The worker holds the same-thread `NovelSession` + OPFS store; the main thread uses `createSessionClient`. `LlmPort.complete` should `fetch("/api/llm")` — **do not put API keys in the worker bundle**. `generateFoundation` runs in the worker because that is where the store lives.
+Import `attachSessionWorker` from `novel-engine/session` (not `novel-engine/worker`). The worker holds the same-thread `NovelSession` + OPFS store; the main thread uses `createSessionClient`. `LlmPort.complete` should `fetch("/api/llm")` — **do not put API keys in the worker bundle**. `generateFoundation`, `assessFoundationImpact`, and `applyFoundationChange` run in the worker because that is where the store lives.
 
 Details: [docs/session.md](docs/session.md#s4--worker-bridge). Pair: [`examples/session.worker.ts`](examples/session.worker.ts) + [`examples/session-host.ts`](examples/session-host.ts).
 
@@ -576,9 +723,34 @@ const worker = new Worker(new URL("./session.worker.ts", import.meta.url), { typ
 const session = createSessionClient(worker, { bookId: "letter" });
 await session.inspectFoundation({ prompt: "写一本三章短篇" });
 await session.startAutoWrite({ prompt: "……", generateMissing: true });
-await session.assessFoundationImpact({ book: { title: "无主的信", synopsis: "……" } });
 await session.chapter.write({ chapter: 1, mode: "create" });
 ```
+
+<a id="scenario-session-worker-impact"></a>
+
+#### 8.1 Assess + apply over the Worker bridge
+
+Same [7.2a–7.2e](#scenario-session-impact) flows: the client is still a `NovelSession`. Additive protocol commands (`SESSION_PROTOCOL === 1`): `assessFoundationImpact` / `applyFoundationChange`. Confirm gate and `rewriteChapters` default **false** are enforced in the worker.
+
+```ts
+const patch = { characters: [{ name: "林深", role: "主角" }] };
+
+const assessment = await session.assessFoundationImpact(patch);
+// assessment.severity / suggestedChapters / suggestedMode / reasons — UI thread, no write
+
+if (assessment.severity === "rewrite_needed") {
+  const gated = await session.applyFoundationChange({ patch });
+  // gated.status === "needs_confirm" until the host retries:
+}
+
+const outcome = await session.applyFoundationChange({
+  patch,
+  confirmRewrite: assessment.severity === "rewrite_needed",
+  rewriteChapters: false, // host opt-in on the worker too; never auto-rewrite
+});
+```
+
+Busy (`SessionBusyError`) is the worker-side session flag: an in-flight `applyFoundationChange` blocks `chapter.write` across the bridge.
 
 ## How `route` decides
 

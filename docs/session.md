@@ -250,7 +250,7 @@ await session.chapter.write({ chapter: 1, mode: "create" });
 | `createSessionClient(port, { bookId })` | Main-thread `NovelSession`. `bookId` must match the worker session. |
 | Protocol | `SESSION_PROTOCOL === 1`, `ns: "session"` (does not collide with Engine `v: 1` commands). Additive S5/S6 commands: `assessFoundationImpact` / `applyFoundationChange`. Commands → `result` / `event` / `error`. |
 | Busy | Worker-side `SessionBusyError` — `startAutoWrite` / `applyFoundationChange` in flight blocks `chapter.write` across the bridge. |
-| `generateFoundation` | **Runs in the worker** (not on the UI thread) because the book `StorePort` lives there (typically OPFS). A main-thread generate would write a different store. |
+| `generateFoundation` / S5–S6 | **Run in the worker** (not on the UI thread) because the book `StorePort` lives there (typically OPFS). A main-thread generate/apply would write a different store. |
 | `LlmPort` | `fetch` a host BFF. **Do not embed vendor API keys** in a public worker bundle. No Next.js code ships in this package. |
 | Events | Worker forwards `subscribe` events (`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`). |
 
@@ -310,6 +310,21 @@ if (outcome.status === "needs_confirm") {
 | `refineWithLlm` | Forwarded to S5. |
 
 `meta_only` / `forward_only` apply without confirm. Fingerprint files still invalidate `foundation_audit` via `upsertFoundation`. Shares the session busy flag with `startAutoWrite` / `chapter.write`.
+
+### Host scenarios (copy-pasteable)
+
+How-to lives in the root README, same style as Session 7.1–7.6:
+
+| Job | README |
+| --- | --- |
+| Assess only (no write) | [§7.2a](../README.md#scenario-session-impact-assess) |
+| Meta-only apply (title/tags/synopsis) | [§7.2b](../README.md#scenario-session-impact-meta) |
+| Forward-only (future outline) | [§7.2c](../README.md#scenario-session-impact-forward) |
+| `rewrite_needed` + `needs_confirm` gate | [§7.2d](../README.md#scenario-session-impact-confirm) |
+| Batch `chapter.write` after confirm | [§7.2e](../README.md#scenario-session-impact-batch) |
+| Same flows over `createSessionClient` | [§8.1](../README.md#scenario-session-worker-impact) |
+
+Sketch: [`examples/session-workspace.ts`](../examples/session-workspace.ts) · Worker: [`examples/session-host.ts`](../examples/session-host.ts).
 
 ## Errors
 
