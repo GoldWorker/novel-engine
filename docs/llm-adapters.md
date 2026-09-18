@@ -4,6 +4,8 @@
 
 Fetch-based `LlmPort` implementations for **OpenAI**, **Anthropic**, and **DashScope** (Alibaba, OpenAI-compatible mode). Import them from the **optional** subpath so vendor HTTP clients never land in the default `novel-engine` or `novel-engine/worker` bundles.
 
+Host how-to: [guide §6](guide.md#scenario-llm). Internals overview: [architecture](architecture.md). Docs index: [README](README.md).
+
 ```ts
 import { createEngine, MemoryStore } from "novel-engine";
 import { createOpenAiLlm } from "novel-engine/llm";

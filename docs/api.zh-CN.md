@@ -6,7 +6,7 @@
 
 本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。默认入口（`.` / `./worker`）不打包供应商 LLM 客户端。可选 fetch 适配器：[`novel-engine/llm`](llm-adapters.zh-CN.md)。可选宿主 Session：[`novel-engine/session`](session.zh-CN.md)。`src/` 从不导入 `node:fs` / `node:path`。
 
-宿主怎么用按场景写在 [根目录 README](../README.zh-CN.md#使用场景)（[English](../README.md#usage-by-scenario)）。可跑通的源码在 [`examples/`](../examples/)。
+宿主怎么用：[指南](guide.zh-CN.md)（[English](guide.md)）。实现：[架构](architecture.zh-CN.md)。文档索引：[README](README.zh-CN.md)。可跑通的源码在 [`examples/`](../examples/)。
 
 ## 包入口
 
@@ -46,7 +46,7 @@ const engine = createEngine({ store, llm });
 await engine.run({ prompt: "写一本三章短篇：……" });
 ```
 
-同线程 mock：[场景 1（短篇完结）](../README.zh-CN.md#scenario-short-book) 与 [场景 2（分层中长篇）](../README.zh-CN.md#scenario-layered-book)。
+同线程 mock：[指南 §1（短篇完结）](guide.zh-CN.md#scenario-short-book) 与 [指南 §2（分层中长篇）](guide.zh-CN.md#scenario-layered-book)。`route` 实现：[架构](architecture.zh-CN.md#engine-循环-vs-route)。
 
 ## `route` 与领域类型
 
@@ -91,7 +91,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 `MemoryStore` 和 `OpfsStore` 实现了 `list()`，因此快照导出会包含每个文件。自定义适配器可以省略 `list`；导出时会探测已知书籍布局。可选 `remove(path)` 删除路径（缺失则为空操作）；Session 用它作废过期的 foundation audit。
 
-见 [场景 3（浏览器持久化）](../README.zh-CN.md#scenario-opfs)。
+见 [指南 §3（浏览器持久化）](guide.zh-CN.md#scenario-opfs)。写入策略：[架构](architecture.zh-CN.md#opfs-写入策略)。
 
 ## 书籍快照
 
@@ -107,7 +107,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 Zip 由 [fflate](https://github.com/101arrowz/fflate)（浏览器构建）生成。匹配 `.*.tmp` 的临时文件会被跳过。
 
-见 [场景 5（书稿快照）](../README.zh-CN.md#scenario-snapshot)。
+见 [指南 §5（书稿快照）](guide.zh-CN.md#scenario-snapshot)。格式：[架构](architecture.zh-CN.md#快照格式)。
 
 ## Mock LLM
 
@@ -121,7 +121,7 @@ Zip 由 [fflate](https://github.com/101arrowz/fflate)（浏览器构建）生成
 
 ## 可选供应商 LLM（`novel-engine/llm`）
 
-不属于 `.` 或 `./worker`。基于 fetch；无 `openai` / `@anthropic-ai/sdk` 依赖。指南：[llm-adapters.zh-CN.md](llm-adapters.zh-CN.md)（[English](llm-adapters.md)）。场景：[README §6](../README.zh-CN.md#scenario-llm)。
+不属于 `.` 或 `./worker`。基于 fetch；无 `openai` / `@anthropic-ai/sdk` 依赖。指南：[llm-adapters.zh-CN.md](llm-adapters.zh-CN.md)（[English](llm-adapters.md)）。怎么用：[指南 §6](guide.zh-CN.md#scenario-llm)。
 
 | 导出 | 种类 | 说明 |
 | --- | --- | --- |
@@ -139,7 +139,7 @@ tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放�
 
 ## 可选宿主 Session（`novel-engine/session`）
 
-不属于 `.`、`./worker` 或 `./llm`。同线程检查、S2 生成/upsert/自动写作、S3 ChapterRunner、S4 Worker 桥、S5/S6 基础设定影响，以及多书工作区。指南：[session.zh-CN.md](session.zh-CN.md)（[English](session.md)）。场景：[README §7](../README.zh-CN.md#scenario-session)（[只评估](../README.zh-CN.md#scenario-session-impact-assess) · [仅元信息](../README.zh-CN.md#scenario-session-impact-meta) · [只影响后续](../README.zh-CN.md#scenario-session-impact-forward) · [确认闸门](../README.zh-CN.md#scenario-session-impact-confirm) · [批量改写](../README.zh-CN.md#scenario-session-impact-batch)）· [README §8.1](../README.zh-CN.md#scenario-session-worker-impact)。
+不属于 `.`、`./worker` 或 `./llm`。同线程检查、S2 生成/upsert/自动写作、S3 ChapterRunner、S4 Worker 桥、S5/S6 基础设定影响，以及多书工作区。契约：[session.zh-CN.md](session.zh-CN.md)（[English](session.md)）。怎么用：[指南 §7](guide.zh-CN.md#scenario-session)（[只评估](guide.zh-CN.md#scenario-session-impact-assess) · [仅元信息](guide.zh-CN.md#scenario-session-impact-meta) · [只影响后续](guide.zh-CN.md#scenario-session-impact-forward) · [确认闸门](guide.zh-CN.md#scenario-session-impact-confirm) · [批量改写](guide.zh-CN.md#scenario-session-impact-batch)）· [指南 §8.1](guide.zh-CN.md#scenario-session-worker-impact)。实现：[架构](architecture.zh-CN.md#session-桥session_protocol)。
 
 | 导出 | 种类 | 说明 |
 | --- | --- | --- |
@@ -161,7 +161,7 @@ tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放�
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | 已关闭的 session/工作区；未知 `bookId`。 |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`。 |
 
-`generateFoundation` 要求 `LlmPort.complete` 在 **`text` 里返回 JSON**（不新增 tools）。走 Worker 桥时它在 **Worker 里**跑（书的 store 在那边）。默认 `fill_missing` 只 upsert 仍缺的键。`assessFoundationImpact(patch)` 评估的是对照当前 store 的**拟议**补丁——必须在 `applyFoundationChange` / `upsertFoundation` **之前**调用；同一内容已经写入后再评估一次，通常会看起来像「没有变更」。`applyFoundationChange` 对 `rewrite_needed` 是两步确认闸门：先不带 `confirmRewrite` apply，若 `status === "needs_confirm"` 再带 `confirmRewrite: true` 重试。已传 `confirmRewrite: true` 时不会再返回 `needs_confirm`。提供的 `characters` / `worldRules` / `outline` / `layeredOutline` 数组会**整文件替换**。只有 `rewriteChapters: true` 且 `mode`（或 `suggestedMode`）为 `"rewrite"` | `"polish"` 才会重写章节——`suggestedMode === "none"` 时无操作，除非宿主再传 `mode`。宿主怎么用：[README §7.2a–7.2e](../README.zh-CN.md#scenario-session-impact) · [§8.1](../README.zh-CN.md#scenario-session-worker-impact)。`chapter.write` 是专用作者循环（MockLlm 用 `toolCalls`）；不跑 `Engine.run`，也不驱动 `pendingRewrites`。Worker 里的 `LlmPort` 应 `fetch` 宿主 BFF——**不要内嵌供应商密钥**。
+`generateFoundation` 要求 `LlmPort.complete` 在 **`text` 里返回 JSON**（不新增 tools）。走 Worker 桥时它在 **Worker 里**跑。`assessFoundationImpact(patch)` 评估的是**拟议**补丁——必须在 apply/upsert **之前**调用。`applyFoundationChange` 对 `rewrite_needed` 是两步确认闸门（已传 `confirmRewrite: true` 时不会再返回 `needs_confirm`）。提供的数组会整文件替换。只有 `rewriteChapters: true` 且 mode 为 `"rewrite"` | `"polish"` 才会重写章节。怎么用：[指南 §7.2a–e](guide.zh-CN.md#scenario-session-impact) · [§8.1](guide.zh-CN.md#scenario-session-worker-impact)。常见坑：[指南](guide.zh-CN.md#pitfalls)。`chapter.write` 是专用作者循环（不是 `Engine.run` / 不是 `pendingRewrites`）。Worker 里的 `LlmPort` 应 `fetch` 宿主 BFF。
 
 示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)（同线程）· [`examples/session-host.ts`](../examples/session-host.ts)（Worker）。
 
@@ -187,7 +187,7 @@ tool call 的 `arguments` 始终是解析后的对象。**不要把 API Key 放�
 
 命令：`start`、`steer`、`pause`、`resume`、`snapshot`。通知：`event`、`snapshot`、`error`。
 
-见 [场景 4（Web Worker）](../README.zh-CN.md#scenario-worker)。
+见 [指南 §4（Web Worker）](guide.zh-CN.md#scenario-worker)。协议：[架构](architecture.zh-CN.md#engine-worker-协议engine_protocol)。
 
 ## 高级 store 辅助
 

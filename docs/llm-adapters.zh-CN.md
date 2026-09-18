@@ -4,6 +4,8 @@
 
 基于 `fetch` 的 `LlmPort` 实现，覆盖 **OpenAI**、**Anthropic**、**DashScope**（阿里云，OpenAI 兼容模式）。请从**可选**子路径导入，这样供应商 HTTP 客户端不会进入默认的 `novel-engine` / `novel-engine/worker` 包。
 
+宿主怎么用：[指南 §6](guide.zh-CN.md#scenario-llm)。实现概览：[架构](architecture.zh-CN.md)。文档索引：[README](README.zh-CN.md)。
+
 ```ts
 import { createEngine, MemoryStore } from "novel-engine";
 import { createOpenAiLlm } from "novel-engine/llm";

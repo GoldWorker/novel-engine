@@ -4,7 +4,9 @@
 
 ### Documentation
 
-- Session S5/S6 host-call audit: assess a **proposed** patch before apply/upsert; two-step `applyFoundationChange` for `rewrite_needed` (`confirmRewrite: true` never yields `needs_confirm`); `characters` / `worldRules` / `outline` / `layeredOutline` are whole-file replace; `rewriteChapters` is a no-op when `suggestedMode` is `"none"` unless `mode` is passed; README §7.5 guards `getProgress()` null; §8.1 Worker example includes the confirm-gate apply. EN/ZH READMEs, `docs/session.md`, `docs/api.md`, and `examples/` stay in sync. No version bump.
+- Split host usage from internals: [guide](docs/guide.md) (copy-paste scenarios, including audited S5/S6 confirm-gate flows), [architecture](docs/architecture.md) (Ports, `route`, protocols, store layout), [docs/README.md](docs/README.md) index. Root README is the product hub; `docs/session.md` / `docs/api.md` stay reference. EN/ZH stay in sync. No version bump.
+
+- Session S5/S6 host-call audit: assess a **proposed** patch before apply/upsert; two-step `applyFoundationChange` for `rewrite_needed` (`confirmRewrite: true` never yields `needs_confirm`); `characters` / `worldRules` / `outline` / `layeredOutline` are whole-file replace; `rewriteChapters` is a no-op when `suggestedMode` is `"none"` unless `mode` is passed; guide §7.5 guards `getProgress()` null; §8.1 Worker example includes the confirm-gate apply. EN/ZH stay in sync. No version bump.
 
 ## 0.4.0 — 2026-09-18
 

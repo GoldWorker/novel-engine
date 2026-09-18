@@ -6,7 +6,7 @@ Stable surface for host apps. Import from `novel-engine` unless noted. The publi
 
 This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, Arbiter full scenes, or ChapterAdvanceGate review UI. Default entries (`.` / `./worker`) do not bundle vendor LLM clients. Optional fetch adapters: [`novel-engine/llm`](llm-adapters.md). Optional host session: [`novel-engine/session`](session.md). `src/` never imports `node:fs` / `node:path`.
 
-Host how-to is grouped by scenario in the [root README](../README.md#usage-by-scenario) ([中文](../README.zh-CN.md#使用场景)). Runnable sources: [`examples/`](../examples/).
+Host how-to: [guide](guide.md) ([中文](guide.zh-CN.md)). Internals: [architecture](architecture.md). Docs index: [README](README.md). Runnable sources: [`examples/`](../examples/).
 
 ## Package entries
 
@@ -46,7 +46,7 @@ const engine = createEngine({ store, llm });
 await engine.run({ prompt: "写一本三章短篇：……" });
 ```
 
-Same-thread mocks: [scenario 1 (short book)](../README.md#scenario-short-book) and [scenario 2 (layered)](../README.md#scenario-layered-book).
+Same-thread mocks: [guide §1 (short book)](guide.md#scenario-short-book) and [guide §2 (layered)](guide.md#scenario-layered-book). `route` internals: [architecture](architecture.md#engine-loop-vs-route).
 
 ## `route` and domain
 
@@ -91,7 +91,7 @@ Hosts implement `LlmPort` against a gateway or WebLLM, or import optional fetch 
 
 `MemoryStore` and `OpfsStore` implement `list()` so snapshot export includes every file. Custom adapters may omit `list`; export then probes the known book layout. Optional `remove(path)` deletes a path (no-op if missing); Session uses it to invalidate a stale foundation audit.
 
-See [scenario 3 (OPFS persist)](../README.md#scenario-opfs).
+See [guide §3 (OPFS persist)](guide.md#scenario-opfs). Write strategy: [architecture](architecture.md#opfs-write-strategy).
 
 ## Book snapshot
 
@@ -107,7 +107,7 @@ See [scenario 3 (OPFS persist)](../README.md#scenario-opfs).
 
 Zip is built with [fflate](https://github.com/101arrowz/fflate) (browser build). Temp files matching `.*.tmp` are skipped.
 
-See [scenario 5 (book snapshot)](../README.md#scenario-snapshot).
+See [guide §5 (book snapshot)](guide.md#scenario-snapshot). Format: [architecture](architecture.md#snapshot-format).
 
 ## Mock LLM
 
@@ -121,7 +121,7 @@ Tests and the short/layered mock books use these only — no live providers.
 
 ## Optional vendor LLM (`novel-engine/llm`)
 
-Not part of `.` or `./worker`. Fetch-based; no `openai` / `@anthropic-ai/sdk` dependency. Guide: [llm-adapters.md](llm-adapters.md) ([中文](llm-adapters.zh-CN.md)). Scenario: [README §6](../README.md#scenario-llm).
+Not part of `.` or `./worker`. Fetch-based; no `openai` / `@anthropic-ai/sdk` dependency. Guide: [llm-adapters.md](llm-adapters.md) ([中文](llm-adapters.zh-CN.md)). How-to: [guide §6](guide.md#scenario-llm).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -139,7 +139,7 @@ Sketch: [`examples/llm-openai.ts`](../examples/llm-openai.ts).
 
 ## Optional host session (`novel-engine/session`)
 
-Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, S3 ChapterRunner, S4 Worker bridge, S5/S6 foundation impact, and multi-book workspace. Guide: [session.md](session.md) ([中文](session.zh-CN.md)). Scenarios: [README §7](../README.md#scenario-session) ([assess only](../README.md#scenario-session-impact-assess) · [meta-only](../README.md#scenario-session-impact-meta) · [forward-only](../README.md#scenario-session-impact-forward) · [confirm gate](../README.md#scenario-session-impact-confirm) · [batch rewrite](../README.md#scenario-session-impact-batch)) · [README §8.1](../README.md#scenario-session-worker-impact).
+Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, S3 ChapterRunner, S4 Worker bridge, S5/S6 foundation impact, and multi-book workspace. Contracts: [session.md](session.md) ([中文](session.zh-CN.md)). How-to: [guide §7](guide.md#scenario-session) ([assess](guide.md#scenario-session-impact-assess) · [meta](guide.md#scenario-session-impact-meta) · [forward](guide.md#scenario-session-impact-forward) · [confirm](guide.md#scenario-session-impact-confirm) · [batch](guide.md#scenario-session-impact-batch)) · [guide §8.1](guide.md#scenario-session-worker-impact). Internals: [architecture](architecture.md#session-bridge-session_protocol).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -161,7 +161,7 @@ Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | Closed session/workspace; unknown `bookId`. |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`. |
 
-`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). On the Worker bridge it runs **in the worker** (the book store lives there). `fill_missing` (default) only upserts keys that are still gaps. `assessFoundationImpact(patch)` evaluates a **proposed** patch against the current store — call it **before** `applyFoundationChange` / `upsertFoundation`; a second assess after the same content is already written typically looks like “no change.” `applyFoundationChange` is a two-step confirm gate for `rewrite_needed`: apply without `confirmRewrite`, then retry with `confirmRewrite: true` if `status === "needs_confirm"`. Passing `confirmRewrite: true` never returns `needs_confirm`. Provided `characters` / `worldRules` / `outline` / `layeredOutline` arrays **replace the whole file**. Chapters rewrite only when `rewriteChapters: true` and `mode` (or `suggestedMode`) is `"rewrite"` | `"polish"` — `suggestedMode === "none"` is a no-op unless the host also passes `mode`. Host how-to: [README §7.2a–7.2e](../README.md#scenario-session-impact) · [§8.1](../README.md#scenario-session-worker-impact). `chapter.write` is a dedicated writer loop (MockLlm `toolCalls`); it does not run `Engine.run` or drive `pendingRewrites`. Worker `LlmPort` should `fetch` a host BFF — **do not embed vendor keys**.
+`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). On the Worker bridge it runs **in the worker**. `assessFoundationImpact(patch)` evaluates a **proposed** patch — call it **before** apply/upsert. `applyFoundationChange` is a two-step confirm gate for `rewrite_needed` (`confirmRewrite: true` never returns `needs_confirm`). Provided arrays replace the whole file. Chapters rewrite only when `rewriteChapters: true` and mode is `"rewrite"` | `"polish"`. How-to: [guide §7.2a–e](guide.md#scenario-session-impact) · [§8.1](guide.md#scenario-session-worker-impact). Pitfalls: [guide](guide.md#pitfalls). `chapter.write` is a dedicated writer loop (not `Engine.run` / not `pendingRewrites`). Worker `LlmPort` should `fetch` a host BFF.
 
 Sketches: [`examples/session-workspace.ts`](../examples/session-workspace.ts) (same-thread) · [`examples/session-host.ts`](../examples/session-host.ts) (Worker).
 
@@ -187,7 +187,7 @@ From `novel-engine/worker`:
 
 Commands: `start`, `steer`, `pause`, `resume`, `snapshot`. Notices: `event`, `snapshot`, `error`.
 
-See [scenario 4 (Web Worker)](../README.md#scenario-worker).
+See [guide §4 (Web Worker)](guide.md#scenario-worker). Protocol: [architecture](architecture.md#engine-worker-protocol-engine_protocol).
 
 ## Advanced store helpers
 
