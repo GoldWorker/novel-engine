@@ -4,7 +4,8 @@
 
 ### Documentation
 
-- Consolidate host docs to **three bodies** (plus thin indexes): [guide](docs/guide.md) (how-to — Kit first, install, LLM adapters, Engine / Session copy-paste flows), [api](docs/api.md) (stable exports plus Session S0–S6 contracts, errors, protocol), [architecture](docs/architecture.md) (internals). Root README is a short product entry (Guide · API · Architecture). Removed `docs/guide-kit.md`, `docs/session.md`, `docs/llm-adapters.md` and ZH counterparts; in-repo links updated. No package version bump.
+- Consolidate host docs to **three bodies** (plus thin indexes): [guide](docs/guide.md) (how-to — Kit first, install, LLM adapters, Engine / Session copy-paste flows), [api](docs/api.md) (stable exports plus Session S0–S6 contracts, errors, protocol), [architecture](docs/architecture.md) (internals). Removed `docs/guide-kit.md`, `docs/session.md`, `docs/llm-adapters.md` and ZH counterparts; in-repo links updated. No package version bump.
+- Root README is the practical landing page: out-of-the-box `NovelKit.create` (browser + Node/tests), usage-scenario table, and example file index. Long audited Session flows stay in the [guide](docs/guide.md). EN/ZH stay in sync.
 
 ## 0.5.0 — 2026-09-18
 
