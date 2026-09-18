@@ -14,7 +14,9 @@
       "novel-engine": ["./src/index.ts"],
       "novel-engine/worker": ["./src/worker.ts"],
       "novel-engine/llm": ["./src/adapters/llm/index.ts"],
-      "novel-engine/session": ["./src/session/index.ts"]
+      "novel-engine/session": ["./src/session/index.ts"],
+      "novel-engine/kit": ["./src/kit/index.ts"],
+      "novel-engine/kit/worker": ["./src/kit/worker-entry.ts"]
     }
   },
   "include": ["examples/**/*.ts"]

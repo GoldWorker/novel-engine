@@ -47,6 +47,7 @@ cd ../..
 ```ts
 import { createEngine, MemoryStore } from "../../vendor/novel-engine/dist/index.js";
 import { createNovelSession } from "../../vendor/novel-engine/dist/session.js";
+import { NovelKit } from "../../vendor/novel-engine/dist/kit.js";
 import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js";
 import { createOpenAiLlm } from "../../vendor/novel-engine/dist/llm.js";
 ```
@@ -65,7 +66,7 @@ import { createOpenAiLlm } from "../../vendor/novel-engine/dist/llm.js";
 }
 ```
 
-然后可以用惯用导入：`novel-engine`、`novel-engine/session`、`novel-engine/worker`、`novel-engine/llm`。引擎更新后在 `vendor/novel-engine` 里重新 `npm run build`。
+然后可以用惯用导入：`novel-engine`、`novel-engine/kit`、`novel-engine/session`、`novel-engine/worker`、`novel-engine/llm`。引擎更新后在 `vendor/novel-engine` 里重新 `npm run build`。
 
 #### TypeScript `paths` → `src/`（仅打包器）
 
@@ -77,6 +78,7 @@ Next.js / Vite（`moduleResolution: "bundler"`）可以编译这份 TypeScript�
     "moduleResolution": "bundler",
     "paths": {
       "novel-engine": ["./vendor/novel-engine/src/index.ts"],
+      "novel-engine/kit": ["./vendor/novel-engine/src/kit/index.ts"],
       "novel-engine/session": ["./vendor/novel-engine/src/session/index.ts"],
       "novel-engine/worker": ["./vendor/novel-engine/src/worker.ts"],
       "novel-engine/llm": ["./vendor/novel-engine/src/adapters/llm/index.ts"]
@@ -102,6 +104,15 @@ npm install novel-engine
 打包实现：[架构](architecture.zh-CN.md#打包exports--本地引用)。
 
 ## 快速开始
+
+**开箱（浏览器工作台推荐）：** [`novel-engine/kit`](guide-kit.zh-CN.md) — `NovelKit.create`、自带 Worker、默认 OPFS + Worker。Node/测试：`runtime: "main"` + `store: "memory"`。
+
+```ts
+import { NovelKit } from "novel-engine/kit";
+
+const kit = await NovelKit.create({ llmEndpoint: "/api/llm" });
+const { gaps, readyToWrite } = await kit.inspect({ prompt: "写一本三章短篇" });
+```
 
 同线程 Engine + `MemoryStore` + `MockLlm`（包名导入；若 vendoring 且不用 `file:`，改用上面的相对 `dist/` 路径）：
 

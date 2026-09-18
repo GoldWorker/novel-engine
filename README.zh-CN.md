@@ -2,11 +2,11 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**[指南](docs/guide.zh-CN.md)** · **[API](docs/api.zh-CN.md)** · **[Session](docs/session.zh-CN.md)** · **[架构](docs/architecture.zh-CN.md)** · [English](README.md)
+**[指南](docs/guide.zh-CN.md)** · **[Kit](docs/guide-kit.zh-CN.md)** · **[API](docs/api.zh-CN.md)** · **[Session](docs/session.zh-CN.md)** · **[架构](docs/architecture.zh-CN.md)** · [English](README.md)
 
 可复用的 **TypeScript** 小说引擎 SDK，给想在浏览器（或 Node 测试）里生成小说的宿主（host）使用。纯 ESM，无 UI、无 React 绑定、无 TUI。
 
-**0.4.0** 在可选入口 `novel-engine/session` 上增加 Session **S5/S6**（`assessFoundationImpact` / `applyFoundationChange`），并保留 `novel-engine/llm`（OpenAI / Anthropic / DashScope 的 fetch 适配器）。默认包仍然不含供应商客户端，也不会打进 session。
+**0.5.0** 增加可选入口 **`novel-engine/kit`**：只有 `NovelKit.create`（没有 `new` + `init`），默认 **OPFS + Worker**，并**随包装箱发布** `dist/novel-kit.worker.js`，宿主不必再维护 Worker 源码。Session（`novel-engine/session`）仍是参考 API。默认 `.` / `./worker` / `./llm` 包仍然不含供应商客户端。
 
 默认的 `novel-engine` / `novel-engine/worker` 从不连接真实模型。`src/` 中也从不使用 `node:fs` / `node:path`。
 
@@ -17,7 +17,7 @@
 ## 不包含什么
 
 - 默认 `novel-engine` / `novel-engine/worker` 包里的供应商 LLM 客户端——请自行注入 `LlmPort`，或导入可选的 [`novel-engine/llm`](docs/llm-adapters.zh-CN.md)（fetch 适配器；**不要把 API Key 放进公开浏览器应用**）
-- 默认包里的宿主 Session——请导入可选的 [`novel-engine/session`](docs/session.zh-CN.md)（S0–S6 检查、生成、自动写作、ChapterRunner、基础设定影响评估、Worker 桥、工作区）
+- 默认包里的宿主 Session——请导入可选的 [`novel-engine/kit`](docs/guide-kit.zh-CN.md)（开箱门面）或 [`novel-engine/session`](docs/session.zh-CN.md)（S0–S6 检查、生成、自动写作、ChapterRunner、基础设定影响评估、Worker 桥、工作区）
 - React 包、Demo SPA 或任何可视化应用
 - Arbiter（仲裁器）完整语义场景（`plan_start` 只是关键词桩）
 - ChapterAdvanceGate 审阅模式 UI
@@ -31,6 +31,7 @@
 // 从 my-app/src/lib/engine.ts
 import { createEngine, MemoryStore } from "../../vendor/novel-engine/dist/index.js";
 import { createNovelSession } from "../../vendor/novel-engine/dist/session.js";
+import { NovelKit } from "../../vendor/novel-engine/dist/kit.js";
 import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js";
 import { createOpenAiLlm } from "../../vendor/novel-engine/dist/llm.js";
 ```
@@ -51,6 +52,8 @@ npm install novel-engine
 | `./worker` | `novel-engine/worker` | `attachEngineWorker` + Engine/stores，供专用 Worker 使用 |
 | `./llm` | `novel-engine/llm` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope） |
 | `./session` | `novel-engine/session` | 可选同线程宿主 Session + Worker session 桥 |
+| `./kit` | `novel-engine/kit` | 开箱 `NovelKit.create`（默认 OPFS + Worker） |
+| `./kit/worker` | `novel-engine/kit/worker` | 随包装箱发布的 Kit Worker（`dist/novel-kit.worker.js`） |
 
 发布的 `files`：`dist/`、`README.md`、`LICENSE`。
 
@@ -62,6 +65,7 @@ npm install novel-engine
 
 | 场景 | 什么时候用 | 指南 | 规范源码 |
 | --- | --- | --- | --- |
+| 0. **NovelKit（推荐）** | 浏览器工作台：OPFS + 自带 Worker；Node/测试：`runtime: "main"` + `store: "memory"` | [kit](docs/guide-kit.zh-CN.md) | [`kit-host.ts`](examples/kit-host.ts) |
 | 1. 短篇完结 | 同线程把三章短篇 mock 跑到 `phase=complete` | [§1](docs/guide.zh-CN.md#scenario-short-book) | [`short-book.ts`](examples/short-book.ts) |
 | 2. 分层中长篇 | 卷/弧大纲，弧末审阅 → `expand_next_arc` | [§2](docs/guide.zh-CN.md#scenario-layered-book) | [`layered-book.ts`](examples/layered-book.ts) |
 | 3. 浏览器持久化（OPFS） | 刷新后产物还在 | [§3](docs/guide.zh-CN.md#scenario-opfs) | [`opfs-store.ts`](examples/opfs-store.ts) |
@@ -98,9 +102,10 @@ import {
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
+import { NovelKit } from "novel-engine/kit";
 ```
 
-稳定面：[docs/api.zh-CN.md](docs/api.zh-CN.md)。Session 契约：[docs/session.zh-CN.md](docs/session.zh-CN.md)。
+稳定面：[docs/api.zh-CN.md](docs/api.zh-CN.md)。Kit 怎么用：[docs/guide-kit.zh-CN.md](docs/guide-kit.zh-CN.md)。Session 契约：[docs/session.zh-CN.md](docs/session.zh-CN.md)。
 
 ## 开发 / 测试
 

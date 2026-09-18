@@ -8,7 +8,7 @@
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-包版本 **0.4.0**。本文覆盖 **S0–S6**。
+包版本 **0.4.0**（Session 表面）。包装箱是 **0.5.0**；开箱宿主路径是 [`novel-engine/kit`](guide-kit.zh-CN.md)。本文覆盖 **S0–S6**。
 
 ## 状态
 

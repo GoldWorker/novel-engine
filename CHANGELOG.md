@@ -2,12 +2,21 @@
 
 ## Unreleased
 
+## 0.5.0 — 2026-09-18
+
+### Added
+
+- **Optional `novel-engine/kit`** — host façade `NovelKit.create` only (no `new` + `init`). Defaults **ON**: `store: "opfs"`, `runtime: "worker"`, `workspace: true`, `bookId: "default"`, `llmEndpoint: "/api/llm"`, `fallbackToMemory: true`. Node/tests opt out with `store: "memory"` / `runtime: "main"` (`llm` required on main). Readonly `storeKind` / `runtime` / `bookId` on the instance.
+- **Shipped kit worker** — build publishes `dist/novel-kit.worker.js` (`novel-engine/kit/worker`). Hosts do **not** maintain worker source. Default URL: `new URL("./novel-kit.worker.js", import.meta.url)` relative to `dist/kit.js` (vendored/`file:` copies). Documented `public/` copy + `workerUrl` fallback.
+- **Worker LLM** — `LlmPort.complete` → `fetch(llmEndpoint)`. No API keys in the worker. On create, main sends a kit **init** handshake (`ns: "kit"`) with `llmEndpoint`, `bookId`, OPFS options, then attaches the existing Session bridge (`SESSION_PROTOCOL`). If both `llm` and `llmEndpoint` are passed in worker mode, the worker uses `llmEndpoint`.
+- Scenario methods wrap Session 1:1 (`inspect` → `inspectFoundation`, `applyFoundation` → `applyFoundationChange`, …). Confirm gate, whole-file replace, `rewriteChapters` default false, and no mid-session LLM swap are unchanged. Multi-book methods throw when `workspace: false`.
+
 ### Documentation
 
-- Split host usage from internals: [guide](docs/guide.md) (copy-paste scenarios, including audited S5/S6 confirm-gate flows), [architecture](docs/architecture.md) (Ports, `route`, protocols, store layout), [docs/README.md](docs/README.md) index. Root README is the product hub; `docs/session.md` / `docs/api.md` stay reference. EN/ZH stay in sync. No version bump.
-- Host install: **copy** this package into the app (`vendor/novel-engine/` etc.), `npm install && npm run build`, then relative `dist/` imports (or `file:./vendor/novel-engine` to keep the package name). Registry `npm install novel-engine` remains the other option. `exports` includes `./package.json`. No version bump.
-
-- Session S5/S6 host-call audit: assess a **proposed** patch before apply/upsert; two-step `applyFoundationChange` for `rewrite_needed` (`confirmRewrite: true` never yields `needs_confirm`); `characters` / `worldRules` / `outline` / `layeredOutline` are whole-file replace; `rewriteChapters` is a no-op when `suggestedMode` is `"none"` unless `mode` is passed; guide §7.5 guards `getProgress()` null; §8.1 Worker example includes the confirm-gate apply. EN/ZH stay in sync. No version bump.
+- [guide-kit.md](docs/guide-kit.md) / [guide-kit.zh-CN.md](docs/guide-kit.zh-CN.md): create-only, shipped worker, `llmEndpoint`, optional `bookId`, defaults OPFS+Worker. Kit is the new out-of-the-box path; Session remains reference.
+- Split host usage from internals: [guide](docs/guide.md) (copy-paste scenarios, including audited S5/S6 confirm-gate flows), [architecture](docs/architecture.md) (Ports, `route`, protocols, store layout), [docs/README.md](docs/README.md) index. Root README is the product hub; `docs/session.md` / `docs/api.md` stay reference. EN/ZH stay in sync.
+- Host install: **copy** this package into the app (`vendor/novel-engine/` etc.), `npm install && npm run build`, then relative `dist/` imports (or `file:./vendor/novel-engine` to keep the package name). Registry `npm install novel-engine` remains the other option. `exports` includes `./package.json`.
+- Session S5/S6 host-call audit: assess a **proposed** patch before apply/upsert; two-step `applyFoundationChange` for `rewrite_needed` (`confirmRewrite: true` never yields `needs_confirm`); `characters` / `worldRules` / `outline` / `layeredOutline` are whole-file replace; `rewriteChapters` is a no-op when `suggestedMode` is `"none"` unless `mode` is passed; guide §7.5 guards `getProgress()` null; §8.1 Worker example includes the confirm-gate apply. EN/ZH stay in sync.
 
 ## 0.4.0 — 2026-09-18
 

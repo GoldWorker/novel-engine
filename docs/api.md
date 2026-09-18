@@ -1,12 +1,12 @@
-# novel-engine API (0.4.0)
+# novel-engine API (0.5.0)
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
 Stable surface for host apps. Import from `novel-engine` unless noted. The published package only ships `dist/`, `README.md`, and `LICENSE`. Vendored copies import `dist/*.js` by relative path or `"novel-engine": "file:./vendor/novel-engine"` after build — [guide — Install](guide.md#install).
 
-This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, Arbiter full scenes, or ChapterAdvanceGate review UI. Default entries (`.` / `./worker`) do not bundle vendor LLM clients. Optional fetch adapters: [`novel-engine/llm`](llm-adapters.md). Optional host session: [`novel-engine/session`](session.md). `src/` never imports `node:fs` / `node:path`.
+This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, Arbiter full scenes, or ChapterAdvanceGate review UI. Default entries (`.` / `./worker`) do not bundle vendor LLM clients. Optional fetch adapters: [`novel-engine/llm`](llm-adapters.md). Optional out-of-the-box host: [`novel-engine/kit`](guide-kit.md). Optional host session (reference): [`novel-engine/session`](session.md). `src/` never imports `node:fs` / `node:path`.
 
-Host how-to: [guide](guide.md) ([中文](guide.zh-CN.md)). Internals: [architecture](architecture.md). Docs index: [README](README.md). Runnable sources: [`examples/`](../examples/).
+Host how-to: [guide](guide.md) ([中文](guide.zh-CN.md)) · [kit](guide-kit.md). Internals: [architecture](architecture.md). Docs index: [README](README.md). Runnable sources: [`examples/`](../examples/).
 
 ## Package entries
 
@@ -16,12 +16,15 @@ Host how-to: [guide](guide.md) ([中文](guide.zh-CN.md)). Internals: [architect
 | `./worker` | `dist/worker.js` | `attachEngineWorker` plus Engine / stores / snapshot for a dedicated worker |
 | `./llm` | `dist/llm.js` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope). Not pulled into `.` or `./worker`. |
 | `./session` | `dist/session.js` | Optional same-thread host session (S0–S6 inspect, generate, auto-write, ChapterRunner, foundation impact, Worker bridge, workspace). Not pulled into `.` / `./worker` / `./llm`. |
+| `./kit` | `dist/kit.js` | Out-of-the-box `NovelKit.create` (defaults OPFS + Worker). Not pulled into `.` / `./worker` / `./llm` / `./session`. |
+| `./kit/worker` | `dist/novel-kit.worker.js` | Shipped kit Dedicated Worker. Init handshake then Session bridge. |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
+import { NovelKit } from "novel-engine/kit";
 ```
 
 ## Engine
@@ -164,6 +167,30 @@ Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert
 `generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). On the Worker bridge it runs **in the worker**. `assessFoundationImpact(patch)` evaluates a **proposed** patch — call it **before** apply/upsert. `applyFoundationChange` is a two-step confirm gate for `rewrite_needed` (`confirmRewrite: true` never returns `needs_confirm`). Provided arrays replace the whole file. Chapters rewrite only when `rewriteChapters: true` and mode is `"rewrite"` | `"polish"`. How-to: [guide §7.2a–e](guide.md#scenario-session-impact) · [§8.1](guide.md#scenario-session-worker-impact). Pitfalls: [guide](guide.md#pitfalls). `chapter.write` is a dedicated writer loop (not `Engine.run` / not `pendingRewrites`). Worker `LlmPort` should `fetch` a host BFF.
 
 Sketches: [`examples/session-workspace.ts`](../examples/session-workspace.ts) (same-thread) · [`examples/session-host.ts`](../examples/session-host.ts) (Worker).
+
+<a id="optional-novelkit-novel-enginekit"></a>
+
+## Optional NovelKit (`novel-engine/kit`)
+
+Not part of `.`, `./worker`, `./llm`, or `./session`. Out-of-the-box façade: **`NovelKit.create` only**. Defaults `store: "opfs"` + `runtime: "worker"`. Hosts get a ready worker from the package (`dist/novel-kit.worker.js`). How-to: [guide-kit](guide-kit.md) ([中文](guide-kit.zh-CN.md)). Init handshake: [architecture](architecture.md#kit-worker-init). Session remains the reference API.
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `NovelKit.create(options?)` | fn | Async factory. No public constructor. |
+| `NovelKit` | class | Scenario methods wrap Session. Readonly `bookId`, `storeKind`, `runtime`. |
+| `NovelKitOptions` | type | `runtime`, `store`, `llm`, `llmEndpoint`, `bookId`, `workerUrl`, `workspace`, `fallbackToMemory`, `opfs`. |
+| `KitStoreKind` / `KitRuntime` | type | `"opfs" \| "memory" \| "custom"` / `"worker" \| "main"`. |
+| `defaultKitWorkerUrl()` | fn | `new URL("./novel-kit.worker.js", import.meta.url)` relative to `dist/kit.js`. |
+| `KIT_PROTOCOL` / `KIT_NS` / `isKitInitCommand` / `isKitNotice` | const / fn | Kit init handshake (`v: 1`, `ns: "kit"`). Distinct from Session. |
+| `attachKitWorker(port)` | fn | Worker-side init + session attach (also the shipped worker entry). |
+| `KitLlmRequiredError` | class | `runtime: "main"` without `llm`. |
+| `KitWorkerError` | class | Missing `Worker`, bad custom store on worker, init timeout. |
+| `KitWorkspaceDisabledError` | class | Multi-book methods with `workspace: false` or a custom `StorePort`. |
+| `KitClosedError` | class | Calls after `dispose()`. |
+
+`llm` is required for `runtime: "main"`, optional for worker (worker uses `llmEndpoint`; if both are passed, worker uses `llmEndpoint`). `bookId` default `"default"`. OPFS missing → `MemoryStore` when `fallbackToMemory` is true (default).
+
+Sketch: [`examples/kit-host.ts`](../examples/kit-host.ts).
 
 ## Worker host
 
