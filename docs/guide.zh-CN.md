@@ -2,7 +2,7 @@
 
 [English](guide.md) | [中文文档](guide.zh-CN.md)
 
-给宿主应用的「怎么用」。**Kit 是默认路径。** Engine 与 Session 是进阶用法。先复制片段，再打开链接里的 `examples/*.ts` 看完整可跑文件。
+给宿主应用的「怎么用」。**Kit 是默认路径。** Engine 与 Session 是进阶用法。宿主落地页（使用场景 + 完整 Kit API 目录）：根目录 [README](../README.zh-CN.md)。先复制片段，再打开链接里的 `examples/*.ts` 看完整可跑文件。
 
 契约（导出、Session S0–S6、错误）：[api](api.zh-CN.md)。实现（`route`、协议、store 布局、Kit init 握手）：[架构](architecture.zh-CN.md)。文档索引：[README](README.zh-CN.md)。
 
@@ -224,7 +224,7 @@ create 时，主线程先发 **init**（`ns: "kit"`），带上 `llmEndpoint`、
 - 调用 `latestCompleted` / `nextChapter` 前先判断 `getProgress()` 是否为 null。
 - 会话中途不换 LLM（Worker 的 endpoint 在 init 时定死）。
 
-`startBook` 在默认 `requireConfirmGaps: true` 时，可能返回 `{ status: "needs_foundation" }` 而不跑 `Engine.run`。
+`startBook` 在默认 `requireConfirmGaps: true` 时，可能返回 `{ status: "needs_foundation" }` 而不跑 `Engine.run`。book/premise/outline/characters/worldRules 都齐之后，剩下的缺口常常是 `foundation_audit`——`generateMissing` 填不了它（由 Engine 写审查）。UI 确认后再用 `requireConfirmGaps: false` 重试。
 
 `workspace: false`（或自定义 `StorePort`）时，多书方法会抛出明确的 `KitWorkspaceDisabledError`。
 
@@ -702,7 +702,7 @@ if (assessment.severity === "rewrite_needed") {
 
 <a id="scenario-session-impact-meta"></a>
 
-#### 7.2b 仅元信息 apply（标题 / 标签 / 简介）
+#### 7.2b 仅元信息 apply（标题 / 简介）
 
 ```ts
 const patch = {
@@ -715,7 +715,7 @@ const assessment = await session.assessFoundationImpact(patch);
 
 const outcome = await session.applyFoundationChange({
   patch,
-  rewriteChapters: false, // 默认；标题/标签不得改写章节
+  rewriteChapters: false, // 默认；标题/简介不得改写章节
 });
 // outcome.status === "applied"
 ```
@@ -825,7 +825,7 @@ if (outcome.status === "needs_confirm") {
 | --- | --- | --- |
 | 新建章 | `create` | 无终稿（或 `force: true`） |
 | 续写草稿 | `continue` | 有草稿、无终稿 |
-| 重写已完成章 | `rewrite` | 有终稿 + `instruction` |
+| 重写已完成章 | `rewrite` | 有终稿（`instruction` 可选） |
 | 轻度打磨 | `polish` | 有终稿 |
 
 ```ts

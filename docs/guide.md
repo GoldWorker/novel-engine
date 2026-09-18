@@ -2,7 +2,7 @@
 
 [English](guide.md) | [中文文档](guide.zh-CN.md)
 
-How-to for host apps. **Kit is the default path.** Engine and Session are advanced. Copy a snippet, then open the linked `examples/*.ts` for the full runnable file.
+How-to for host apps. **Kit is the default path.** Engine and Session are advanced. Host landing (usage scenarios + full Kit API catalog): root [README](../README.md). Copy a snippet, then open the linked `examples/*.ts` for the full runnable file.
 
 Contracts (exports, Session S0–S6, errors): [api](api.md). Internals (`route`, protocols, store layout, Kit init handshake): [architecture](architecture.md). Docs index: [README](README.md).
 
@@ -224,7 +224,7 @@ Preserved Session behavior:
 - Guard `getProgress()` null before `latestCompleted` / `nextChapter`.
 - No mid-session LLM swap (worker endpoint is fixed at init).
 
-`startBook` may return `{ status: "needs_foundation" }` without `Engine.run` (default `requireConfirmGaps: true`).
+`startBook` may return `{ status: "needs_foundation" }` without `Engine.run` (default `requireConfirmGaps: true`). After book/premise/outline/characters/worldRules exist, the leftover gap is often `foundation_audit` — `generateMissing` cannot fill it (Engine writes the audit). Confirm in the UI, then retry with `requireConfirmGaps: false`.
 
 When `workspace: false` (or a custom `StorePort`), multi-book methods throw a clear `KitWorkspaceDisabledError`.
 
@@ -702,7 +702,7 @@ if (assessment.severity === "rewrite_needed") {
 
 <a id="scenario-session-impact-meta"></a>
 
-#### 7.2b Meta-only apply (title / tags / synopsis)
+#### 7.2b Meta-only apply (title / synopsis)
 
 ```ts
 const patch = {
@@ -715,7 +715,7 @@ const assessment = await session.assessFoundationImpact(patch);
 
 const outcome = await session.applyFoundationChange({
   patch,
-  rewriteChapters: false, // default; title/tags must not rewrite chapters
+  rewriteChapters: false, // default; title/synopsis must not rewrite chapters
 });
 // outcome.status === "applied"
 ```
@@ -825,7 +825,7 @@ Omit `rewriteChapters` (or pass `false`) to update foundation only. `pendingRewr
 | --- | --- | --- |
 | New chapter | `create` | No final (or `force: true`) |
 | Continue draft | `continue` | Draft exists, no final |
-| Rewrite finished chapter | `rewrite` | Final exists + `instruction` |
+| Rewrite finished chapter | `rewrite` | Final exists (`instruction` optional) |
 | Light polish | `polish` | Final exists |
 
 ```ts

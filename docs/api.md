@@ -27,6 +27,8 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 import { NovelKit } from "novel-engine/kit";
 ```
 
+<a id="engine"></a>
+
 ## Engine
 
 | Export | Kind | Notes |
@@ -295,7 +297,7 @@ Single-chapter create / continue / rewrite / polish on the **same-thread** sessi
 | --- | --- | --- |
 | `create` | No final (unless `force: true`) | `plan_chapter` → `draft_chapter(write)` → `commit_chapter`. Existing final → `ChapterConflictError`. |
 | `continue` | Draft present, no final | Resume via `draft_chapter(append)` then commit. |
-| `rewrite` | Final present | New plan/draft/commit with `instruction`. Overwrites the completed chapter (session override; **not** `pendingRewrites`). |
+| `rewrite` | Final present | New plan/draft/commit (`instruction` optional). Overwrites the completed chapter (session override; **not** `pendingRewrites`). |
 | `polish` | Final present | Lighter rewrite of the existing final (same tool path, polish-oriented prompt). |
 
 `chapter.write` injects an internal `sessionOverride` only on `plan_chapter` / `commit_chapter` so a completed chapter can be overwritten. Engine sequential saga is unchanged when that flag is absent.
@@ -328,7 +330,7 @@ Host how-to: [guide §7.2a](guide.md#scenario-session-impact-assess).
 
 | Field | Meaning |
 | --- | --- |
-| `severity` | `meta_only` — title/tags/synopsis-style `meta/book.json`. `forward_only` — changes mainly for unwritten future chapters. `rewrite_needed` — character / world / past-plot contradictions with written finals. |
+| `severity` | `meta_only` — title/synopsis-style `meta/book.json` (`BookMetadata` has no tags field). `forward_only` — changes mainly for unwritten future chapters. `rewrite_needed` — character / world / past-plot contradictions with written finals. |
 | `suggestedChapters` | Sorted unique written chapters that may need rewrite/polish (`chapters/NN.md` present). |
 | `suggestedRanges` | Inclusive compact ranges derived from `suggestedChapters` (e.g. `{ start: 1, end: 3 }`). |
 | `suggestedMode` | `none` \| `polish` \| `rewrite`. |
