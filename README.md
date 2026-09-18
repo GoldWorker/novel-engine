@@ -54,21 +54,32 @@ import { NovelKit } from "novel-engine/kit";
 Published npm `files`: `dist/`, `README.md`, `LICENSE` (this English README only — the Chinese README and `docs/` ship in git / vendored copies, not the registry tarball). Node `>=18.17`. Details: [guide — Install](docs/guide.md#install).
 
 <a id="init"></a>
+<a id="wire-the-llm"></a>
 
 ### Initialize
 
-**Create only** (`NovelKit.create`). Defaults **OPFS + Worker**. Omit `bookId` → `"default"`. Worker mode **ignores** `options.llm` even if you pass it — the worker always `fetch`es `llmEndpoint`.
+**Create only** (`NovelKit.create`). Defaults **OPFS + Worker**. Omit `bookId` → `"default"`. There is **no** `new NovelKit()` / `init()`.
 
-| Option | Default | Opt out |
+Wire the LLM **only at create** — there is no API to swap `llm` or `llmEndpoint` mid-session (the worker endpoint is fixed in the init handshake).
+
+**When the LLM is required / optional**
+
+- **Browser default** (`runtime: "worker"`, OPFS): do **not** pass `llm`. Pass **`llmEndpoint`** (BFF URL; default `"/api/llm"`). Kit **ships** `dist/novel-kit.worker.js`; the worker `fetch`es that URL. Do **not** put API keys in the browser.
+- **Main-thread / Node / tests** (`runtime: "main"`, usually `store: "memory"`): **`llm: LlmPort` is required**. Omitting it throws `KitLlmRequiredError`. `llmEndpoint` is unused.
+
+**Conflicts:** Worker always uses `llmEndpoint` (passing `llm` as well still ignores it). Main always uses `llm` (`llmEndpoint` is unused). A custom `StorePort` and `opfs.root` / `opfs.storage` require `runtime: "main"`.
+
+| Option | Default | Notes |
 | --- | --- | --- |
 | `store` | `"opfs"` | `"memory"` (Node/tests) or a `StorePort` (`runtime: "main"` only) |
 | `runtime` | `"worker"` | `"main"` (Node/tests; **`llm` required**) |
-| `llmEndpoint` | `"/api/llm"` | your BFF route (worker mode) |
+| `llm` | — | **`LlmPort` instance.** Required on `"main"`. **Ignored** on `"worker"` |
+| `llmEndpoint` | `"/api/llm"` | **Worker only** — BFF URL the shipped worker `fetch`es. Unused on `"main"`. Empty string throws |
 | `bookId` | `"default"` | any non-empty string |
 | `workspace` | `true` | `false` — `createBook` / `switchBook` / `listBooks` throw |
 | `fallbackToMemory` | `true` | `false` throws `OpfsUnavailableError` if OPFS is missing |
 
-Browser (recommended):
+**Browser default (Worker + OPFS)** — pass `llmEndpoint`. The worker `POST`s `LlmCompletionRequest` JSON to that URL and expects `{ text: string, toolCalls? }`. Put vendor keys on the BFF (call `createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm` there): [guide §6](docs/guide.md#scenario-llm).
 
 ```ts
 import { NovelKit } from "novel-engine/kit";
@@ -81,21 +92,31 @@ const kit = await NovelKit.create({
 console.log(kit.runtime, kit.storeKind, kit.bookId); // "worker", "opfs"|"memory", "default"
 ```
 
-Node / tests (`runtime: "main"` + `store: "memory"`; **`llm` is required**):
+**Main-thread / Node / tests** — pass an `llm: LlmPort`. Construct one with `novel-engine/llm` adapters (`createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm`), a custom port, or `MockLlm`.
 
 ```ts
-import { MockLlm } from "novel-engine";
+import { createOpenAiLlm } from "novel-engine/llm";
 import { NovelKit } from "novel-engine/kit";
+
+const llm = createOpenAiLlm({
+  apiKey: "sk-replace-me", // trusted host / BFF env — never a public SPA
+  model: "gpt-4o-mini",
+});
+// createAnthropicLlm({ apiKey: "sk-replace-me", model: "claude-sonnet-4-20250514" })
+// createDashScopeLlm({ apiKey: "sk-replace-me", model: "qwen-plus" })
+// import { MockLlm, type LlmPort } from "novel-engine";
+// const llm: LlmPort = { complete: async () => ({ text: "……" }) };
+// const llm = new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]);
 
 const kit = await NovelKit.create({
   runtime: "main",
   store: "memory",
-  llm: new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]),
+  llm,
   bookId: "letter",
 });
 ```
 
-There is **no** `new NovelKit()` / `init()`. LLM endpoint and `llm` are **create-only** — no mid-session swap. Sketch: [`examples/kit-host.ts`](examples/kit-host.ts). Worker URL / bundler 404: [Worker notes](#worker-notes). Full options: [API catalog](#novelkit-create).
+Sketch: [`examples/kit-host.ts`](examples/kit-host.ts) (worker `llmEndpoint` + main `MockLlm`). Adapter factories: [`examples/llm-openai.ts`](examples/llm-openai.ts) · [guide §6](docs/guide.md#scenario-llm). Worker URL / bundler 404: [Worker notes](#worker-notes). Full options: [API catalog](#novelkit-create).
 
 <a id="short-book"></a>
 
@@ -373,10 +394,10 @@ import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 
 | Option | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `runtime` | `"worker"` \| `"main"` | `"worker"` | `"main"` is same-thread (Node/tests) |
+| `runtime` | `"worker"` \| `"main"` | `"worker"` | `"main"` is same-thread (Node/tests) and **requires `llm`**. `"worker"` uses `llmEndpoint`, not `llm` |
 | `store` | `"opfs"` \| `"memory"` \| `StorePort` | `"opfs"` | Custom `StorePort` → `runtime: "main"` only; `storeKind: "custom"` |
-| `llm` | `LlmPort` | — | **Required** on `"main"`. **Ignored** on `"worker"` |
-| `llmEndpoint` | `string` | `"/api/llm"` | Worker `fetch` URL. Unused on `"main"`. Must be non-empty |
+| `llm` | `LlmPort` | — | **Required** on `"main"` (`KitLlmRequiredError` if omitted). **Ignored** on `"worker"` even if passed. Init-time only (no mid-session swap). Construct with `createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm` from `novel-engine/llm`, or any `LlmPort` / `MockLlm`. How-to: [Initialize](#init) |
+| `llmEndpoint` | `string` | `"/api/llm"` | **Worker only.** BFF URL; shipped `dist/novel-kit.worker.js` `POST`s completion JSON and expects `{ text, toolCalls? }`. Unused on `"main"`. Non-empty. Do **not** put API keys in the browser |
 | `bookId` | `string` | `"default"` | Non-empty after trim |
 | `workerUrl` | `string` \| `URL` | shipped worker | Override if the default URL 404s |
 | `workspace` | `boolean` | `true` | `false` → multi-book methods throw |

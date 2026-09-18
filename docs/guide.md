@@ -117,13 +117,14 @@ Contracts: [api](api.md#optional-novelkit-novel-enginekit). Internals / init han
 
 ### Defaults
 
-| Option | Default | Opt out |
+| Option | Default | Notes |
 | --- | --- | --- |
 | `store` | `"opfs"` | `"memory"` (Node/tests) or a `StorePort` (`runtime: "main"` only) |
-| `runtime` | `"worker"` | `"main"` (Node/tests) |
+| `runtime` | `"worker"` | `"main"` (Node/tests; **`llm` required**) |
 | `workspace` | `true` | `false` — `createBook` / `switchBook` / `listBooks` throw |
 | `bookId` | `"default"` | pass any non-empty string |
-| `llmEndpoint` | `"/api/llm"` | your BFF route |
+| `llm` | — | **Required** on `"main"` (`KitLlmRequiredError` if omitted). **Ignored** on `"worker"` |
+| `llmEndpoint` | `"/api/llm"` | **Worker only** — BFF URL the shipped worker `fetch`es. Unused on `"main"` |
 | `fallbackToMemory` | `true` | `false` throws `OpfsUnavailableError` when OPFS is missing |
 
 Readonly on the instance: `bookId`, `storeKind` (`"opfs"` \| `"memory"` \| `"custom"`), `runtime`.
@@ -153,25 +154,37 @@ kit.subscribe((event) => {
 kit.dispose(); // closes the session and terminates the worker
 ```
 
-`llm` is **ignored** in worker mode even if you pass it — the worker always uses `llmEndpoint`. Pass `llm` only for `runtime: "main"`. Put vendor keys on a BFF — see [Security](#security).
+`llm` is **ignored** in worker mode even if you pass it — the worker always uses `llmEndpoint`. Pass `llm` only for `runtime: "main"`. Put vendor keys on a BFF — see [Security](#security). LLM is **create-only** (no mid-session swap).
 
 Canonical sketch: [`examples/kit-host.ts`](../examples/kit-host.ts).
 
 ### Node / tests (main + memory)
 
-`llm` is **required** on `runtime: "main"`.
+`runtime: "main"` **requires** an `llm: LlmPort` (`KitLlmRequiredError` if omitted). `llmEndpoint` is unused. Construct the port with `novel-engine/llm` adapters, a custom `LlmPort`, or `MockLlm`. LLM is **create-only** — no mid-session swap.
 
 ```ts
-import { MockLlm } from "novel-engine";
+import { createOpenAiLlm } from "novel-engine/llm";
 import { NovelKit } from "novel-engine/kit";
+
+const llm = createOpenAiLlm({
+  apiKey: "sk-replace-me", // trusted host / BFF env — never a public SPA
+  model: "gpt-4o-mini",
+});
+// createAnthropicLlm({ apiKey, model: "claude-sonnet-4-20250514" })
+// createDashScopeLlm({ apiKey, model: "qwen-plus" })
+// import { MockLlm, type LlmPort } from "novel-engine";
+// const llm: LlmPort = { complete: async () => ({ text: "……" }) };
+// const llm = new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]);
 
 const kit = await NovelKit.create({
   runtime: "main",
   store: "memory",
-  llm: new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]),
+  llm,
   bookId: "letter",
 });
 ```
+
+Adapter factories and BFF mapping: [LLM adapters](#scenario-llm).
 
 ### Shipped worker URL
 

@@ -117,13 +117,14 @@ Session（`novel-engine/session`）仍是参考实现。Kit 只做组合 + 默�
 
 ### 默认值
 
-| 选项 | 默认 | 如何关掉 |
+| 选项 | 默认 | 说明 |
 | --- | --- | --- |
 | `store` | `"opfs"` | `"memory"`（Node/测试）或传入 `StorePort`（仅 `runtime: "main"`） |
-| `runtime` | `"worker"` | `"main"`（Node/测试） |
+| `runtime` | `"worker"` | `"main"`（Node/测试；**必须传 `llm`**） |
 | `workspace` | `true` | `false` — `createBook` / `switchBook` / `listBooks` 会抛错 |
 | `bookId` | `"default"` | 传入非空字符串 |
-| `llmEndpoint` | `"/api/llm"` | 你的 BFF 路由 |
+| `llm` | — | `"main"` 上**必填**（省略抛 `KitLlmRequiredError`）。`"worker"` 上**忽略** |
+| `llmEndpoint` | `"/api/llm"` | **仅 Worker** — 随包装箱 Worker `fetch` 的 BFF URL。`"main"` 上不用 |
 | `fallbackToMemory` | `true` | `false`：没有 OPFS 时抛 `OpfsUnavailableError` |
 
 实例只读：`bookId`、`storeKind`（`"opfs"` \| `"memory"` \| `"custom"`）、`runtime`。
@@ -153,25 +154,37 @@ kit.subscribe((event) => {
 kit.dispose(); // 关闭 session 并 terminate Worker
 ```
 
-Worker 模式下即使传入 `llm` **也会被忽略**——Worker 始终使用 `llmEndpoint`。只在 `runtime: "main"` 时传 `llm`。供应商密钥放在 BFF——见 [安全](#security)。
+Worker 模式下即使传入 `llm` **也会被忽略**——Worker 始终使用 `llmEndpoint`。只在 `runtime: "main"` 时传 `llm`。供应商密钥放在 BFF——见 [安全](#security)。LLM **只在 create 时**绑定（会话中途不能换）。
 
 规范示意：[`examples/kit-host.ts`](../examples/kit-host.ts)。
 
 ### Node / 测试（main + memory）
 
-`runtime: "main"` **必须**传 `llm`。
+`runtime: "main"` **必须**传 `llm: LlmPort`（省略抛 `KitLlmRequiredError`）。`llmEndpoint` 不会被使用。用 `novel-engine/llm` 适配器、自定义 `LlmPort` 或 `MockLlm` 构造。LLM **只在 create 时**绑定——会话中途不能换。
 
 ```ts
-import { MockLlm } from "novel-engine";
+import { createOpenAiLlm } from "novel-engine/llm";
 import { NovelKit } from "novel-engine/kit";
+
+const llm = createOpenAiLlm({
+  apiKey: "sk-replace-me", // 受信任宿主 / BFF 环境 — 不要放进公开 SPA
+  model: "gpt-4o-mini",
+});
+// createAnthropicLlm({ apiKey, model: "claude-sonnet-4-20250514" })
+// createDashScopeLlm({ apiKey, model: "qwen-plus" })
+// import { MockLlm, type LlmPort } from "novel-engine";
+// const llm: LlmPort = { complete: async () => ({ text: "……" }) };
+// const llm = new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]);
 
 const kit = await NovelKit.create({
   runtime: "main",
   store: "memory",
-  llm: new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]),
+  llm,
   bookId: "letter",
 });
 ```
+
+适配器工厂与 BFF 映射：[LLM 适配器](#scenario-llm)。
 
 ### 随包装箱发布的 Worker URL
 

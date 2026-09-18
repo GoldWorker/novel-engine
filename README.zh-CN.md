@@ -55,21 +55,33 @@ import { NovelKit } from "novel-engine/kit";
 发布的 npm `files`：`dist/`、`README.md`、`LICENSE`（只有这份英文 README——中文 README 与 `docs/` 在 git / 拷进仓库的副本里，不在登记处 tarball 中）。Node `>=18.17`。细节：[指南 — 安装](docs/guide.zh-CN.md#install)。
 
 <a id="init"></a>
+<a id="初始化-llm"></a>
+<a id="wire-the-llm"></a>
 
 ### 初始化
 
-**只有 `NovelKit.create`**。默认 **OPFS + Worker**。省略 `bookId` → `"default"`。Worker 模式即使传入 `options.llm` 也会**忽略**——Worker 始终 `fetch(llmEndpoint)`。
+**只有 `NovelKit.create`**。默认 **OPFS + Worker**。省略 `bookId` → `"default"`。**没有** `new NovelKit()` / `init()`。
 
-| 选项 | 默认 | 如何关掉 |
+LLM **只在 create 时接入**——没有中途更换 `llm` 或 `llmEndpoint` 的 API（Worker 的 endpoint 在 init 握手时定死）。
+
+**何时必须传 / 何时可选**
+
+- **浏览器默认**（`runtime: "worker"`，OPFS）：**不要**传 `llm`。传 **`llmEndpoint`**（BFF URL；默认 `"/api/llm"`）。Kit **自带** `dist/novel-kit.worker.js`，由 Worker `fetch` 该 URL。**不要**把 API Key 放进浏览器。
+- **主线程 / Node / 测试**（`runtime: "main"`，通常 `store: "memory"`）：**必须**传 `llm: LlmPort`。省略会抛 `KitLlmRequiredError`。`llmEndpoint` 不会被使用。
+
+**互相冲突的选项：** Worker 始终用 `llmEndpoint`（同时传 `llm` 也会被忽略）。Main 始终用 `llm`（`llmEndpoint` 不用）。自定义 `StorePort` 以及 `opfs.root` / `opfs.storage` 需要 `runtime: "main"`。
+
+| 选项 | 默认 | 说明 |
 | --- | --- | --- |
 | `store` | `"opfs"` | `"memory"`（Node/测试）或一个 `StorePort`（仅 `runtime: "main"`） |
 | `runtime` | `"worker"` | `"main"`（Node/测试；**必须传 `llm`**） |
-| `llmEndpoint` | `"/api/llm"` | 你的 BFF 路由（Worker 模式） |
+| `llm` | — | **`LlmPort` 实例。** `"main"` 上必填。`"worker"` 上**忽略** |
+| `llmEndpoint` | `"/api/llm"` | **仅 Worker** — 随包装箱 Worker `fetch` 的 BFF URL。`"main"` 上不用。空字符串会抛错 |
 | `bookId` | `"default"` | 任意非空字符串 |
 | `workspace` | `true` | `false`：`createBook` / `switchBook` / `listBooks` 抛错 |
 | `fallbackToMemory` | `true` | `false`：没有 OPFS 时抛 `OpfsUnavailableError` |
 
-浏览器（推荐）：
+**浏览器默认（Worker + OPFS）** — 传 `llmEndpoint`。Worker 对该 URL `POST` `LlmCompletionRequest` JSON，期望返回 `{ text: string, toolCalls? }`。供应商密钥放在 BFF（在那边调用 `createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm`）：[指南 §6](docs/guide.zh-CN.md#scenario-llm)。
 
 ```ts
 import { NovelKit } from "novel-engine/kit";
@@ -82,21 +94,31 @@ const kit = await NovelKit.create({
 console.log(kit.runtime, kit.storeKind, kit.bookId); // "worker", "opfs"|"memory", "default"
 ```
 
-Node / 测试（`runtime: "main"` + `store: "memory"`；**必须**传 `llm`）：
+**主线程 / Node / 测试** — 传入 `llm: LlmPort`。用 `novel-engine/llm` 适配器（`createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm`）、自定义 port 或 `MockLlm` 构造。
 
 ```ts
-import { MockLlm } from "novel-engine";
+import { createOpenAiLlm } from "novel-engine/llm";
 import { NovelKit } from "novel-engine/kit";
+
+const llm = createOpenAiLlm({
+  apiKey: "sk-replace-me", // 受信任宿主 / BFF 环境 — 不要放进公开 SPA
+  model: "gpt-4o-mini",
+});
+// createAnthropicLlm({ apiKey: "sk-replace-me", model: "claude-sonnet-4-20250514" })
+// createDashScopeLlm({ apiKey: "sk-replace-me", model: "qwen-plus" })
+// import { MockLlm, type LlmPort } from "novel-engine";
+// const llm: LlmPort = { complete: async () => ({ text: "……" }) };
+// const llm = new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]);
 
 const kit = await NovelKit.create({
   runtime: "main",
   store: "memory",
-  llm: new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]),
+  llm,
   bookId: "letter",
 });
 ```
 
-**没有** `new NovelKit()` / `init()`。LLM endpoint 与 `llm` 只在 **create 时**绑定——会话中途不能换。示意：[`examples/kit-host.ts`](examples/kit-host.ts)。Worker URL / 打包器 404：[Worker 说明](#worker-notes)。完整选项：[API 目录](#novelkit-create)。
+示意：[`examples/kit-host.ts`](examples/kit-host.ts)（Worker 的 `llmEndpoint` + main 的 `MockLlm`）。适配器工厂：[`examples/llm-openai.ts`](examples/llm-openai.ts) · [指南 §6](docs/guide.zh-CN.md#scenario-llm)。Worker URL / 打包器 404：[Worker 说明](#worker-notes)。完整选项：[API 目录](#novelkit-create)。
 
 <a id="short-book"></a>
 
@@ -375,10 +397,10 @@ import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 
 | 选项 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `runtime` | `"worker"` \| `"main"` | `"worker"` | `"main"` 为同线程（Node/测试） |
+| `runtime` | `"worker"` \| `"main"` | `"worker"` | `"main"` 为同线程（Node/测试）且**必须传 `llm`**。`"worker"` 用 `llmEndpoint`，不用 `llm` |
 | `store` | `"opfs"` \| `"memory"` \| `StorePort` | `"opfs"` | 自定义 `StorePort` 仅限 `"main"`；`storeKind: "custom"` |
-| `llm` | `LlmPort` | — | `"main"` 上**必填**。`"worker"` 上**忽略** |
-| `llmEndpoint` | `string` | `"/api/llm"` | Worker `fetch` URL。`"main"` 上不用。必须非空 |
+| `llm` | `LlmPort` | — | `"main"` 上**必填**（省略抛 `KitLlmRequiredError`）。`"worker"` 上即使传入也**忽略**。只在 create 时绑定（会话中途不能换）。用 `novel-engine/llm` 的 `createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm` 构造，或任意 `LlmPort` / `MockLlm`。怎么传：[初始化](#init) |
+| `llmEndpoint` | `string` | `"/api/llm"` | **仅 Worker。** BFF URL；随包装箱的 `dist/novel-kit.worker.js` 会 `POST` 完成请求 JSON，期望 `{ text, toolCalls? }`。`"main"` 上不用。必须非空。**不要**把 API Key 放进浏览器 |
 | `bookId` | `string` | `"default"` | trim 后非空 |
 | `workerUrl` | `string` \| `URL` | 随包装箱 Worker | 默认 URL 404 时覆盖 |
 | `workspace` | `boolean` | `true` | `false` → 多书方法抛错 |
