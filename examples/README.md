@@ -1,6 +1,6 @@
 # Usage examples
 
-Canonical runnable TypeScript for the **[host guide](../docs/guide.md)** ([中文](../docs/guide.zh-CN.md)). The root [README](../README.md) is the product landing (out-of-the-box Kit, usage scenarios, this folder); internals live in [architecture](../docs/architecture.md).
+Canonical runnable TypeScript for the **[host guide](../docs/guide.md)** ([中文](../docs/guide.zh-CN.md)). The root [README](../README.md) is the host landing (usage scenarios + Kit API catalog, this folder); internals live in [architecture](../docs/architecture.md).
 
 These files import `novel-engine` / `novel-engine/worker` the way a real app would. They are **documentation** (not part of `npm test`); the supported in-repo mock runs remain `npm test`, `npm run test:short`, and `npm run test:layered`.
 

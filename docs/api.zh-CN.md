@@ -27,6 +27,8 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 import { NovelKit } from "novel-engine/kit";
 ```
 
+<a id="engine"></a>
+
 ## Engine（引擎）
 
 | 导出 | 种类 | 说明 |
@@ -295,7 +297,7 @@ interface FoundationGap {
 | --- | --- | --- |
 | `create` | 无终稿（除非 `force: true`） | `plan_chapter` → `draft_chapter(write)` → `commit_chapter`。已有终稿 → `ChapterConflictError`。 |
 | `continue` | 有草稿、无终稿 | `draft_chapter(append)` 后续写再 commit。 |
-| `rewrite` | 有终稿 | 带 `instruction` 重新 plan/draft/commit。覆盖已完成章（session override；**不是** `pendingRewrites`）。 |
+| `rewrite` | 有终稿 | 重新 plan/draft/commit（`instruction` 可选）。覆盖已完成章（session override；**不是** `pendingRewrites`）。 |
 | `polish` | 有终稿 | 对现有终稿做较轻改写（同一工具路径，polish 向提示）。 |
 
 `chapter.write` 只在 `plan_chapter` / `commit_chapter` 上注入内部 `sessionOverride`，以便覆盖已完成章。没有该标志时，Engine 顺序 saga 不变。
@@ -328,7 +330,7 @@ MockLlm：脚本 `toolCalls`（与 S2 的 `generateFoundation` 用 `text` 里的
 
 | 字段 | 含义 |
 | --- | --- |
-| `severity` | `meta_only` — 标题/标签/简介类 `meta/book.json`。`forward_only` — 主要影响未写的后续章节。`rewrite_needed` — 角色 / 世界 / 已写情节与终稿矛盾。 |
+| `severity` | `meta_only` — 标题/简介类 `meta/book.json`（`BookMetadata` 没有 tags 字段）。`forward_only` — 主要影响未写的后续章节。`rewrite_needed` — 角色 / 世界 / 已写情节与终稿矛盾。 |
 | `suggestedChapters` | 可能需要 rewrite/polish 的已写章节（有 `chapters/NN.md`，排序去重）。 |
 | `suggestedRanges` | 由 `suggestedChapters` 压缩的闭区间（如 `{ start: 1, end: 3 }`）。 |
 | `suggestedMode` | `none` \| `polish` \| `rewrite`。 |
