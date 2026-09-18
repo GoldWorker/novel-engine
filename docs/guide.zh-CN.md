@@ -6,9 +6,104 @@
 
 `examples/` 是文档，不进入 `npm test`。仓库内 mock：`npm run test:short` 与 `npm run test:layered`。
 
+<a id="install"></a>
+
+## 安装
+
+### 把源码拷进宿主（推荐）
+
+把本包的**包根目录**放进应用，重新安装并构建，再用相对路径导入（或用 `"novel-engine": "file:./vendor/novel-engine"` 保留包名）。
+
+**拷什么：** 含 `package.json`、`src/`、`tsup.config.ts`、`tsconfig.json`、`LICENSE` 的目录（README 可选）。**不要**拷 `node_modules/` 或过期的 `dist/`——在副本里重新 `npm install` 和 `npm run build`。除非你有意保留版本历史，否则跳过 `.git/`。
+
+```
+my-app/
+  package.json
+  tsconfig.json
+  src/
+    lib/engine.ts          # 宿主代码
+    app/page.tsx           # Next.js 示例
+  vendor/novel-engine/     # 或 packages/ / lib/ / third_party/
+    package.json
+    src/
+    tsup.config.ts
+    dist/                  # 构建之后
+```
+
+```bash
+# 拷贝之后
+cd vendor/novel-engine
+npm install                # 安装 fflate + tsup（构建需要）
+npm run build              # 写出 dist/（上游 gitignore — dist 导入前必须有）
+cd ../..
+```
+
+`dist/` 才是受支持的运行时表面（`exports` → `dist/*.js`）。`fflate` 是 external：要么依赖这份 vendored 目录（见下，让 npm 装上它），要么只做相对 `dist/` 导入时在宿主再装 `fflate`。
+
+#### 相对路径导入 `dist/`（Node、Next.js、Vite）
+
+从 `src/lib/engine.ts`：
+
+```ts
+import { createEngine, MemoryStore } from "../../vendor/novel-engine/dist/index.js";
+import { createNovelSession } from "../../vendor/novel-engine/dist/session.js";
+import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js";
+import { createOpenAiLlm } from "../../vendor/novel-engine/dist/llm.js";
+```
+
+从 `src/app/page.tsx`（App Router）前缀同样是 `../../vendor/novel-engine/dist/…`。Worker 模块可以 `import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js"`。
+
+#### 保留包名（`file:` 指向**已拷贝**的目录）
+
+这仍是「在应用内部」，不是旁边另一个仓库：
+
+```json
+{
+  "dependencies": {
+    "novel-engine": "file:./vendor/novel-engine"
+  }
+}
+```
+
+然后可以用惯用导入：`novel-engine`、`novel-engine/session`、`novel-engine/worker`、`novel-engine/llm`。引擎更新后在 `vendor/novel-engine` 里重新 `npm run build`。
+
+#### TypeScript `paths` → `src/`（仅打包器）
+
+Next.js / Vite（`moduleResolution: "bundler"`）可以编译这份 TypeScript。**Node 不能**直接 `import` `src/*.ts`（源码里的说明符是 `.js`）。任何不经打包器的 Node 运行，请用 `dist/`。
+
+```json
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "paths": {
+      "novel-engine": ["./vendor/novel-engine/src/index.ts"],
+      "novel-engine/session": ["./vendor/novel-engine/src/session/index.ts"],
+      "novel-engine/worker": ["./vendor/novel-engine/src/worker.ts"],
+      "novel-engine/llm": ["./vendor/novel-engine/src/adapters/llm/index.ts"]
+    }
+  }
+}
+```
+
+模块路径上仍需要 `fflate`（在 `vendor/novel-engine` 或宿主里安装）。本仓库 `tsconfig.examples.json` 用同一套映射给 examples 做类型检查——它本身不是安装方式。
+
+### 登记处（另一种方式）
+
+```bash
+npm install novel-engine
+```
+
+然后 `import { createEngine } from "novel-engine"`，子路径相同。打包 `files` 为 `dist/`、`README.md`、`LICENSE`。
+
+### 也可以
+
+旁边仓库构建后用 `"novel-engine": "file:../novel-engine"`，但这不是宿主的主布局。
+
+打包实现：[架构](architecture.zh-CN.md#打包exports--本地引用)。
+
 ## 快速开始
 
-同线程 Engine + `MemoryStore` + `MockLlm`：
+同线程 Engine + `MemoryStore` + `MockLlm`（包名导入；若 vendoring 且不用 `file:`，改用上面的相对 `dist/` 路径）：
 
 ```ts
 import { createEngine, MemoryStore, MockLlm, inferPlanningStub } from "novel-engine";

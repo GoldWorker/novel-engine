@@ -25,9 +25,23 @@
 
 ## 安装
 
+**拷进宿主（Next.js《小说工作台》推荐）：** 把本包放到应用里（`vendor/novel-engine/`、`packages/novel-engine/` …），构建 `dist/`，再用**相对路径**导入（或 `"novel-engine": "file:./vendor/novel-engine"` 保留包名）。细节：[指南 — 安装](docs/guide.zh-CN.md#install)。
+
+```ts
+// 从 my-app/src/lib/engine.ts
+import { createEngine, MemoryStore } from "../../vendor/novel-engine/dist/index.js";
+import { createNovelSession } from "../../vendor/novel-engine/dist/session.js";
+import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js";
+import { createOpenAiLlm } from "../../vendor/novel-engine/dist/llm.js";
+```
+
+**登记处（另一种方式）：**
+
 ```bash
 npm install novel-engine
 ```
+
+也可以：旁边仓库构建后用 `file:../novel-engine` 依赖——这不是主路径。
 
 包导出：
 

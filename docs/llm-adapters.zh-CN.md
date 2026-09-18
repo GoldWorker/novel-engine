@@ -23,9 +23,7 @@ import { createOpenAiLlm } from "novel-engine/llm";
 
 ## 安装 / 导入
 
-```bash
-npm install novel-engine
-```
+与根包相同：拷进 `vendor/novel-engine/` 后导入 `dist/llm.js`（或构建后 `"file:./vendor/novel-engine"`），或登记处 `npm install novel-engine`。见 [指南 — 安装](guide.zh-CN.md#install)。然后：
 
 ```ts
 import {
@@ -37,7 +35,7 @@ import {
 } from "novel-engine/llm";
 ```
 
-`package.json` 的 `exports` 把 `novel-engine/llm` 映射到 `dist/llm.js`。发布的 `files` 仍是 `dist/`、`README.md`、`LICENSE`。
+`package.json` 的 `exports` 把 `novel-engine/llm` 映射到 `dist/llm.js`。打包 `files` 仍是 `dist/`、`README.md`、`LICENSE`。
 
 ## 工厂函数
 

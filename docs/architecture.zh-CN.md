@@ -184,3 +184,22 @@ foundationMissing(store: StorePort, tier?: PlanningTier): Promise<string[]>
 | `applyFoundationChange({ rewriteChapters: true })` | upsert 之后，对建议终稿顺序 `chapter.write` | 自动改写；默认 `rewriteChapters` 为 false；`suggestedMode === "none"` 时无操作，除非宿主再传 `mode` |
 
 `chapter.write` 只在 `plan_chapter` / `commit_chapter` 上注入内部 `sessionOverride`，以便覆盖已完成章。没有该标志时，Engine 顺序 saga 不变。
+
+## 打包（`exports` / 本地引用）
+
+宿主怎么用：[指南 — 安装](guide.zh-CN.md#install)。
+
+`package.json` `exports` 把公开子路径映射到**构建产物**（不是 `src/`）：
+
+| 子路径 | JS | 类型 |
+| --- | --- | --- |
+| `.` | `dist/index.js` | `dist/index.d.ts` |
+| `./worker` | `dist/worker.js` | `dist/worker.d.ts` |
+| `./llm` | `dist/llm.js` | `dist/llm.d.ts` |
+| `./session` | `dist/session.js` | `dist/session.d.ts` |
+| `./package.json` | `package.json` | — |
+
+`npm pack` / 登记处用的 `files`：`dist/`、`README.md`、`LICENSE`（`dist/` 被 gitignore — 必须 `npm run build`）。仅 ESM（`"type": "module"`）。`fflate` 保持 external，让宿主从 `node_modules` 解析它。
+
+把本树**拷进** `vendor/novel-engine/`（等）的宿主，用相对路径导入 `dist/*.js`，或在副本里 `npm install && npm run build` 后用 `"novel-engine": "file:./vendor/novel-engine"` 保留包名。`src/*.ts` 不是 `exports` 条件；打包器可通过 `tsconfig` `paths` 编译它（见指南）。Node 不能直接跑 TypeScript 树（`.ts` 文件里的说明符是 `.js`）。
+

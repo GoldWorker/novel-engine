@@ -2,7 +2,7 @@
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
-Stable surface for host apps. Import from `novel-engine` unless noted. The published package only ships `dist/`, `README.md`, and `LICENSE`.
+Stable surface for host apps. Import from `novel-engine` unless noted. The published package only ships `dist/`, `README.md`, and `LICENSE`. Vendored copies import `dist/*.js` by relative path or `"novel-engine": "file:./vendor/novel-engine"` after build — [guide — Install](guide.md#install).
 
 This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, Arbiter full scenes, or ChapterAdvanceGate review UI. Default entries (`.` / `./worker`) do not bundle vendor LLM clients. Optional fetch adapters: [`novel-engine/llm`](llm-adapters.md). Optional host session: [`novel-engine/session`](session.md). `src/` never imports `node:fs` / `node:path`.
 

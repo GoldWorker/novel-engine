@@ -28,7 +28,8 @@
       "types": "./dist/session.d.ts",
       "import": "./dist/session.js",
       "default": "./dist/session.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",

@@ -184,3 +184,23 @@ Provided `characters` / `worldRules` / `outline` / `layeredOutline` arrays **rep
 | `applyFoundationChange({ rewriteChapters: true })` | After upsert, sequential `chapter.write` for suggested finals | Auto-rewrite; default `rewriteChapters` is false; no-op when `suggestedMode === "none"` unless host passes `mode` |
 
 `chapter.write` injects an internal `sessionOverride` only on `plan_chapter` / `commit_chapter` so a completed chapter can be overwritten. Engine sequential saga is unchanged when that flag is absent.
+
+## Packaging (`exports` / local consume)
+
+Host how-to: [guide — Install](guide.md#install).
+
+`package.json` `exports` map the public subpaths to **built** files (not `src/`):
+
+| Subpath | JS | Types |
+| --- | --- | --- |
+| `.` | `dist/index.js` | `dist/index.d.ts` |
+| `./worker` | `dist/worker.js` | `dist/worker.d.ts` |
+| `./llm` | `dist/llm.js` | `dist/llm.d.ts` |
+| `./session` | `dist/session.js` | `dist/session.d.ts` |
+| `./package.json` | `package.json` | — |
+
+Hosts that **copy** this tree into `vendor/novel-engine/` (etc.) import `dist/*.js` by relative path, or keep the package name with `"novel-engine": "file:./vendor/novel-engine"` after `npm install && npm run build` in the copy. `src/*.ts` is not an `exports` condition; bundlers may compile it via `tsconfig` `paths` (see the guide). Node cannot execute the TypeScript tree (`.js` specifiers in `.ts` files).
+
+`files` for `npm pack` / registry: `dist/`, `README.md`, `LICENSE` (`dist/` is gitignored — `npm run build` is required). ESM only (`"type": "module"`). `fflate` stays external so hosts resolve it from `node_modules`.
+
+

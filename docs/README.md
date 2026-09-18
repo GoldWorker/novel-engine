@@ -8,7 +8,7 @@ Host how-to lives in the **guide**. Contracts live in **API** / **Session**. Int
 
 | Doc | For |
 | --- | --- |
-| [Host guide](guide.md) | Copy-paste host flows: Engine, Session, OPFS, Workers, snapshots, LLM adapters |
+| [Host guide](guide.md) | Install (vendor copy + relative `dist/` imports, or registry) and copy-paste host flows |
 | [LLM adapters](llm-adapters.md) | Optional `novel-engine/llm` factories, mapping, BFF security |
 
 Root [README](../README.md) is the product entry and scenario hub. It points here instead of duplicating internals.
@@ -24,7 +24,7 @@ Root [README](../README.md) is the product entry and scenario hub. It points her
 
 | Doc | For |
 | --- | --- |
-| [Architecture](architecture.md) | Ports & Adapters, `route`, store layout, fingerprint/audit, Worker protocols, busy lifecycle |
+| [Architecture](architecture.md) | Ports & Adapters, `route`, store layout, fingerprint/audit, Worker protocols, busy lifecycle, packaging/`exports` |
 
 ## Language
 

@@ -23,9 +23,7 @@ These adapters are still useful: they normalize each vendor into the Engine's `{
 
 ## Install / import
 
-```bash
-npm install novel-engine
-```
+Same as the root package: copy into `vendor/novel-engine/` and import `dist/llm.js` (or `file:./vendor/novel-engine` after build), or registry `npm install novel-engine`. See [guide — Install](guide.md#install). Then:
 
 ```ts
 import {
@@ -37,7 +35,7 @@ import {
 } from "novel-engine/llm";
 ```
 
-`package.json` `exports` maps `novel-engine/llm` → `dist/llm.js`. Published `files` remain `dist/`, `README.md`, `LICENSE`.
+`package.json` `exports` maps `novel-engine/llm` → `dist/llm.js`. Packed `files` remain `dist/`, `README.md`, `LICENSE`.
 
 ## Factories
 

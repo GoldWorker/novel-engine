@@ -6,9 +6,104 @@ How-to for host apps. Copy a snippet, then open the linked `examples/*.ts` for t
 
 `examples/` is documentation — not part of `npm test`. In-repo mock runs: `npm run test:short` and `npm run test:layered`.
 
+<a id="install"></a>
+
+## Install
+
+### Copy the source into the host (recommended)
+
+Vendor this **package root** into the app, rebuild, then import with relative paths (or keep the `novel-engine` name via `file:./vendor/novel-engine`).
+
+**What to copy:** the directory that contains `package.json`, `src/`, `tsup.config.ts`, `tsconfig.json`, `LICENSE` (and README if you want). Do **not** copy `node_modules/` or a stale `dist/` — reinstall and rebuild in the copy. Skip `.git/` unless you intentionally vendor VCS history.
+
+```
+my-app/
+  package.json
+  tsconfig.json
+  src/
+    lib/engine.ts          # host code
+    app/page.tsx           # Next.js example
+  vendor/novel-engine/     # or packages/ / lib/ / third_party/
+    package.json
+    src/
+    tsup.config.ts
+    dist/                  # after build
+```
+
+```bash
+# after the copy
+cd vendor/novel-engine
+npm install                # installs fflate + tsup (needed to build)
+npm run build              # writes dist/ (gitignored in upstream — required for dist imports)
+cd ../..
+```
+
+`dist/` is the supported runtime surface (`exports` → `dist/*.js`). `fflate` stays external: either depend on the vendored folder (below) so npm installs it, or add `fflate` on the host if you only use relative `dist/` imports.
+
+#### Relative `dist/` imports (Node, Next.js, Vite)
+
+From `src/lib/engine.ts`:
+
+```ts
+import { createEngine, MemoryStore } from "../../vendor/novel-engine/dist/index.js";
+import { createNovelSession } from "../../vendor/novel-engine/dist/session.js";
+import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js";
+import { createOpenAiLlm } from "../../vendor/novel-engine/dist/llm.js";
+```
+
+From `src/app/page.tsx` (App Router) the prefix is the same `../../vendor/novel-engine/dist/…`. A Worker module can `import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js"`.
+
+#### Keep the package name (`file:` to the **copied** folder)
+
+Still “inside the app”, not a sibling repo:
+
+```json
+{
+  "dependencies": {
+    "novel-engine": "file:./vendor/novel-engine"
+  }
+}
+```
+
+Then the usual imports work: `novel-engine`, `novel-engine/session`, `novel-engine/worker`, `novel-engine/llm`. Rebuild `vendor/novel-engine` after engine updates (`npm run build` there).
+
+#### TypeScript `paths` → `src/` (bundlers only)
+
+Next.js / Vite (`moduleResolution: "bundler"`) can compile the TypeScript tree. **Node cannot** `import` `src/*.ts` (sources use `.js` specifiers). Prefer `dist/` for anything that runs in Node without a bundler.
+
+```json
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "paths": {
+      "novel-engine": ["./vendor/novel-engine/src/index.ts"],
+      "novel-engine/session": ["./vendor/novel-engine/src/session/index.ts"],
+      "novel-engine/worker": ["./vendor/novel-engine/src/worker.ts"],
+      "novel-engine/llm": ["./vendor/novel-engine/src/adapters/llm/index.ts"]
+    }
+  }
+}
+```
+
+You still need `fflate` on the module path (install in `vendor/novel-engine` or on the host). This repo’s `tsconfig.examples.json` uses the same map for in-tree examples — it is not an install method by itself.
+
+### Registry (other option)
+
+```bash
+npm install novel-engine
+```
+
+Then `import { createEngine } from "novel-engine"` and the same subpaths. Packed `files` are `dist/`, `README.md`, `LICENSE`.
+
+### Also possible
+
+A sibling checkout with `"novel-engine": "file:../novel-engine"` (after that tree is built) works, but is not the primary host layout.
+
+Packaging internals: [architecture](architecture.md#packaging-exports--local-consume).
+
 ## Getting started
 
-Same-thread Engine with `MemoryStore` + `MockLlm`:
+Same-thread Engine with `MemoryStore` + `MockLlm` (package-name imports; use the relative `dist/` paths above when vendoring without `file:`):
 
 ```ts
 import { createEngine, MemoryStore, MockLlm, inferPlanningStub } from "novel-engine";

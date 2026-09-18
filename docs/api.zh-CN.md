@@ -2,7 +2,7 @@
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
-宿主应用的稳定面。除非另有说明，一律从 `novel-engine` 导入。发布包只包含 `dist/`、`README.md` 和 `LICENSE`。
+宿主应用的稳定面。除非另有说明，一律从 `novel-engine` 导入。发布包只包含 `dist/`、`README.md` 和 `LICENSE`。拷进宿主的副本用相对路径导入 `dist/*.js`，或构建后 `"novel-engine": "file:./vendor/novel-engine"` —— [指南 — 安装](guide.zh-CN.md#install)。
 
 本库是**纯前端 ESM SDK**。不包含 UI、React 绑定、Demo SPA、Arbiter（仲裁器）完整场景，或 ChapterAdvanceGate 审阅 UI。默认入口（`.` / `./worker`）不打包供应商 LLM 客户端。可选 fetch 适配器：[`novel-engine/llm`](llm-adapters.zh-CN.md)。可选宿主 Session：[`novel-engine/session`](session.zh-CN.md)。`src/` 从不导入 `node:fs` / `node:path`。
 

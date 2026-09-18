@@ -25,9 +25,23 @@ Docs index: [docs/README.md](docs/README.md). Ports, `route`, and Worker protoco
 
 ## Install
 
+**Copy into the host (recommended for Next.js《小说工作台》):** vendor this package under the app (`vendor/novel-engine/`, `packages/novel-engine/`, …), build `dist/`, then import with **relative paths** (or `file:./vendor/novel-engine` to keep the package name). Details: [guide — Install](docs/guide.md#install).
+
+```ts
+// from my-app/src/lib/engine.ts
+import { createEngine, MemoryStore } from "../../vendor/novel-engine/dist/index.js";
+import { createNovelSession } from "../../vendor/novel-engine/dist/session.js";
+import { attachEngineWorker } from "../../vendor/novel-engine/dist/worker.js";
+import { createOpenAiLlm } from "../../vendor/novel-engine/dist/llm.js";
+```
+
+**Registry (other option):**
+
 ```bash
 npm install novel-engine
 ```
+
+Also possible: depend on a sibling checkout with `file:../novel-engine` after that checkout is built.
 
 Package exports:
 
