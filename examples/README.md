@@ -2,7 +2,7 @@
 
 Canonical runnable TypeScript for the **[host guide](../docs/guide.md)** ([中文](../docs/guide.zh-CN.md)). The root [README](../README.md) is the host landing (usage scenarios + Kit API catalog, this folder); internals live in [architecture](../docs/architecture.md).
 
-These files import `novel-engine` / `novel-engine/worker` the way a real app would. They are **documentation** (not part of `npm test`); the supported in-repo mock runs remain `npm test`, `npm run test:short`, and `npm run test:layered`.
+These files import `novel-engine` / `novel-engine/worker` the way a real app would. They are **documentation** (not part of `npm test`); the supported in-repo mock runs remain `npm test`, `npm run test:smoke`, `npm run test:short`, and `npm run test:layered`. Browser worker smoke: `npm run test:browser` ([smoke vs host E2E](../docs/smoke.md)).
 
 Do not duplicate the how-to here — the guide is the hub. This folder is the deep-link target.
 

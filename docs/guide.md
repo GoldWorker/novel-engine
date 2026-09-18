@@ -6,7 +6,7 @@ How-to for host apps. **Kit is the default path.** Engine and Session are advanc
 
 Contracts (exports, Session S0–S6, errors): [api](api.md). Internals (`route`, protocols, store layout, Kit init handshake): [architecture](architecture.md). Docs index: [README](README.md).
 
-`examples/` is documentation — not part of `npm test`. In-repo mock runs: `npm run test:short` and `npm run test:layered`.
+`examples/` is documentation — not part of `npm test`. In-repo mock runs: `npm run test:short`, `npm run test:layered`, and README-job smoke `npm run test:smoke`. Browser worker smoke (built `dist/`): `npm run test:browser`. Host workbench E2E is out of this repo: [smoke vs host E2E](smoke.md).
 
 <a id="install"></a>
 

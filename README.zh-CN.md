@@ -21,7 +21,7 @@
 
 ## 1. 使用场景
 
-每一节对应宿主真实会做的一类工作。示例默认用 **`NovelKit`**。只有 Kit 做不到时才出现 Session / Engine（脚本化 Engine mock、宿主自有 Worker）。需要完整 mock LLM 时从 [`examples/`](examples/) 复制可跑文件。`examples/` 是文档，不进入 `npm test`。
+每一节对应宿主真实会做的一类工作。示例默认用 **`NovelKit`**。只有 Kit 做不到时才出现 Session / Engine（脚本化 Engine mock、宿主自有 Worker）。需要完整 mock LLM 时从 [`examples/`](examples/) 复制可跑文件。`examples/` 是文档，不进入 `npm test`。仓库内场景走查：[`npm run test:smoke`](docs/smoke.zh-CN.md)（MockLlm）与 `npm run test:browser`（自带 worker）。
 
 已审计的中途确认闸门（只评估、仅元信息、只影响后续、改写确认、批量同步章节）：[指南 §7.2a–e](docs/guide.zh-CN.md#scenario-session-impact)。那里的 Session 名称与 Kit 一一对应（`assessFoundationImpact` → `assessFoundation`，`applyFoundationChange` → `applyFoundation`）。
 
@@ -531,12 +531,17 @@ npm install
 npm test
 npm run test:short
 npm run test:layered
+npm run test:smoke
 npm run typecheck
 npm run build
+npx playwright install --with-deps chromium   # 一次即可；CI 也会装
+npm run test:browser                          # 需要先 build 出 dist/
 npx tsc -p tsconfig.examples.json
 ```
 
-测试只用 **mock fixture**——无网络、无真实供应商、无真实 OPFS。供应商适配器套件 mock `fetch`。
+`npm test` 是 Node **vitest**（单元/契约 + README 场景冒烟），**不会**启动浏览器。Playwright worker 冒烟（`test:browser`）加载构建产物 `dist/kit.js` 与自带的 `dist/novel-kit.worker.js`，打到本地 mock BFF——没有供应商密钥。Next.js /《写作工作台》E2E 不在本仓库：[冒烟 vs 宿主 E2E](docs/smoke.zh-CN.md)。
+
+测试只用 **mock fixture**——无外网、无真实供应商。供应商适配器套件 mock `fetch`。浏览器冒烟可能在 Chromium 里用真实 OPFS；若 OPFS 不可用，则走 Kit 文档中的 Memory 回退。
 
 手写 JSON fixture 在 `fixtures/`：
 

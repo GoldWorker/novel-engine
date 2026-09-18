@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>novel-engine kit worker smoke</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "fflate": "/vendor/fflate/browser.js",
+          "fflate/browser": "/vendor/fflate/browser.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <p>Kit worker smoke harness. Loads built <code>dist/kit.js</code> + shipped <code>dist/novel-kit.worker.js</code>.</p>
+    <pre id="log">starting…</pre>
+    <script type="module">
+      const logEl = document.getElementById("log");
+      const lines = [];
+      const consoleErrors = [];
+
+      function log(message) {
+        lines.push(String(message));
+        if (logEl) {
+          logEl.textContent = lines.join("\n");
+        }
+      }
+
+      function recordConsoleError(text) {
+        const value = String(text);
+        if (value.includes("favicon")) {
+          return;
+        }
+        consoleErrors.push(value);
+      }
+
+      window.addEventListener("error", (event) => {
+        recordConsoleError(event.message || event.error);
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        recordConsoleError(event.reason);
+      });
+      const originalError = console.error.bind(console);
+      console.error = (...args) => {
+        recordConsoleError(args.map(String).join(" "));
+        originalError(...args);
+      };
+
+      window.__SMOKE_DONE__ = false;
+      window.__SMOKE_RESULT__ = null;
+      window.__SMOKE_ERROR__ = null;
+
+      async function run() {
+        const workerUrl = new URL("/dist/novel-kit.worker.js", window.location.origin);
+        const workerHead = await fetch(workerUrl, { method: "HEAD" });
+        log(`worker HEAD ${workerHead.status} ${workerUrl.href}`);
+        if (!workerHead.ok) {
+          throw new Error(`shipped worker missing: HTTP ${workerHead.status}`);
+        }
+
+        const fixtureRes = await fetch("/fixtures/short-book.json");
+        if (!fixtureRes.ok) {
+          throw new Error(`fixture missing: HTTP ${fixtureRes.status}`);
+        }
+        const fixture = await fixtureRes.json();
+
+        const { NovelKit } = await import("/dist/kit.js");
+        log("loaded dist/kit.js");
+
+        // Prefer real OPFS in the shipped worker. If headless Chromium cannot
+        // open it, Kit falls back to MemoryStore (fallbackToMemory: true).
+        const kit = await NovelKit.create({
+          bookId: "smoke-letter",
+          workspace: false,
+          fallbackToMemory: true,
+          llmEndpoint: "/api/llm",
+        });
+        log(`created runtime=${kit.runtime} storeKind=${kit.storeKind}`);
+
+        if (kit.runtime !== "worker") {
+          throw new Error(`expected runtime "worker", got ${kit.runtime}`);
+        }
+
+        const inspected = await kit.inspect({ prompt: fixture.prompt });
+        log(`inspect readyToWrite=${inspected.readyToWrite} gaps=${inspected.gaps.map((g) => g.key).join(",")}`);
+
+        await kit.fillFoundation({
+          book: fixture.book,
+          premise: fixture.premise,
+          outline: fixture.outline,
+          characters: fixture.characters,
+          worldRules: fixture.world_rules,
+        });
+        log("fillFoundation ok");
+
+        let outcome = await kit.startBook({
+          prompt: fixture.prompt,
+          generateMissing: true,
+          maxSteps: 24,
+        });
+        log(`startBook status=${outcome.status} auditOnly=${outcome.auditOnly ?? ""}`);
+        if (outcome.status === "needs_foundation" && outcome.auditOnly) {
+          outcome = await kit.startBook({
+            prompt: fixture.prompt,
+            confirmAuditGap: true,
+            maxSteps: 24,
+          });
+          log(`confirmAuditGap status=${outcome.status}`);
+        }
+
+        const chapter1 = await kit.getChapter(1);
+        const result = {
+          runtime: kit.runtime,
+          storeKind: kit.storeKind,
+          workerStatus: workerHead.status,
+          inspectGaps: inspected.gaps.map((gap) => gap.key),
+          outcomeStatus: outcome.status,
+          outcomePhase: outcome.result?.phase ?? null,
+          chapter1Snippet: chapter1?.final ? chapter1.final.slice(0, 24) : null,
+          consoleErrors,
+        };
+        kit.dispose();
+        window.__SMOKE_RESULT__ = result;
+        log(JSON.stringify(result, null, 2));
+      }
+
+      run()
+        .catch((err) => {
+          const message = err && err.stack ? err.stack : String(err);
+          window.__SMOKE_ERROR__ = message;
+          log(message);
+        })
+        .finally(() => {
+          window.__SMOKE_DONE__ = true;
+        });
+    </script>
+  </body>
+</html>

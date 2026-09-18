@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Tests
+
+- **README scenario smoke** (`npm run test:smoke`, also in `npm test`) — Kit walks of the documented host jobs with MockLlm: short book, layered mid, mid-story confirm gate, chapters, pause/resume/cancel + `getRunState`, MemoryStore export/import.
+- **Browser / shipped-worker smoke** (`npm run test:browser`) — Playwright Chromium loads built `dist/kit.js` + `dist/novel-kit.worker.js` against a local mock BFF (`POST /api/llm`). No vendor keys. OPFS preferred; Memory fallback if headless OPFS is unavailable.
+- GitHub Actions CI: typecheck, vitest, build, Playwright Chromium.
+
+### Documentation
+
+- [docs/smoke.md](docs/smoke.md) / [docs/smoke.zh-CN.md](docs/smoke.zh-CN.md): what this repo smokes vs host-owned 《写作工作台》 E2E (BFF, `workerUrl`, OPFS, cancel UX). Package version unchanged (**0.7.0**, tests-only).
+
 ## 0.7.0 — 2026-09-18
 
 ### Compatible
