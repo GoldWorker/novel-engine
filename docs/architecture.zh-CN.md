@@ -2,7 +2,7 @@
 
 [English](architecture.md) | [中文文档](architecture.zh-CN.md)
 
-给贡献者与深度集成者的实现说明。宿主怎么用：[指南](guide.zh-CN.md)。稳定导出：[api](api.zh-CN.md)。Session 契约：[session](session.zh-CN.md)。
+给贡献者与深度集成者的实现说明。宿主怎么用：[指南](guide.zh-CN.md)。稳定导出：[api](api.zh-CN.md)。
 
 ## Ports & Adapters（端口与适配器）
 
@@ -145,7 +145,7 @@ Worker → 主线程通知：`event` / `snapshot` / `error`。
 
 没有 Workspace-over-Worker：把 `createNovelWorkspace` 留在 UI 线程，每本书开一个 session Worker。**Kit**（`novel-engine/kit`）替你做这件事（并自带 Worker）。
 
-契约：[session.zh-CN.md](session.zh-CN.md#s4--worker-桥)。宿主怎么用：[指南 §8](guide.zh-CN.md#scenario-session-worker)。Kit：[guide-kit](guide-kit.zh-CN.md)。
+契约：[api](api.zh-CN.md#s4--worker-桥)。宿主怎么用：[指南 §8](guide.zh-CN.md#scenario-session-worker)。Kit：[指南](guide.zh-CN.md#scenario-kit)。
 
 <a id="kit-worker-init"></a>
 
@@ -186,7 +186,7 @@ foundationMissing(store: StorePort, tier?: PlanningTier): Promise<string[]>
 
 `upsertFoundation` / `applyFoundationChange` 在任何指纹文件变化时会**作废** `meta/foundation_audit.json`（`book`、`premise`、`outline`、`characters`、`world_rules`、`layered_outline`）：实现了 `StorePort.remove` 则删除，否则写入已清空的审查记录。
 
-提供的 `characters` / `worldRules` / `outline` / `layeredOutline` 数组会**整文件替换** JSON。省略的补丁键保持原样。见 [session](session.zh-CN.md#upsertfoundationpatch) 与 [指南：常见坑](guide.zh-CN.md#pitfalls)。
+提供的 `characters` / `worldRules` / `outline` / `layeredOutline` 数组会**整文件替换** JSON。省略的补丁键保持原样。见 [api](api.zh-CN.md#upsertfoundationpatch) 与 [指南：常见坑](guide.zh-CN.md#pitfalls)。
 
 ## ChapterRunner vs `Engine.run` vs `pendingRewrites`
 

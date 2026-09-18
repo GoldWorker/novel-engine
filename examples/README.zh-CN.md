@@ -12,7 +12,7 @@
 
 | 场景（指南） | 文件 |
 | --- | --- |
-| [0. NovelKit（推荐）](../docs/guide-kit.zh-CN.md) | [`kit-host.ts`](kit-host.ts) |
+| [0. NovelKit（推荐）](../docs/guide.zh-CN.md#scenario-kit) | [`kit-host.ts`](kit-host.ts) |
 | [1. 短篇完结](../docs/guide.zh-CN.md#scenario-short-book) | [`short-book.ts`](short-book.ts) |
 | [2. 分层中长篇](../docs/guide.zh-CN.md#scenario-layered-book) | [`layered-book.ts`](layered-book.ts) |
 | [3. 浏览器持久化（OPFS）](../docs/guide.zh-CN.md#scenario-opfs) | [`opfs-store.ts`](opfs-store.ts) |
@@ -22,7 +22,7 @@
 | [7. 宿主 Session](../docs/guide.zh-CN.md#scenario-session) | [`session-workspace.ts`](session-workspace.ts)（含 [7.2a–7.2e](../docs/guide.zh-CN.md#scenario-session-impact) 评估 / 应用） |
 | [8. Worker 上的 Session](../docs/guide.zh-CN.md#scenario-session-worker) | [`session.worker.ts`](session.worker.ts) + [`session-host.ts`](session-host.ts)（含 [8.1](../docs/guide.zh-CN.md#scenario-session-worker-impact)） |
 
-Web Worker 嵌入需要 **两份**文件。把 Worker 文件里的 `LlmPort` 占位换成网关 / WebLLM，或把 `novel-engine/llm` 放在 BFF 后面。见 [docs/llm-adapters.zh-CN.md](../docs/llm-adapters.zh-CN.md)。
+Web Worker 嵌入需要 **两份**文件。把 Worker 文件里的 `LlmPort` 占位换成网关 / WebLLM，或把 `novel-engine/llm` 放在 BFF 后面。见 [指南 — LLM 适配器](../docs/guide.zh-CN.md#scenario-llm)。
 
 本仓库可选类型检查（把 `novel-engine` 映射到 `src/`）：
 
