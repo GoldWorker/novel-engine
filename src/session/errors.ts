@@ -37,7 +37,7 @@ export class BookNotFoundError extends Error {
 
 export class SessionLlmRequiredError extends Error {
   constructor(
-    message = "createNovelSession requires an llm for generateFoundation / startAutoWrite / chapter.write",
+    message = "createNovelSession requires an llm for generateFoundation / startAutoWrite / chapter.write / applyFoundationChange(rewriteChapters)",
   ) {
     super(message);
     this.name = "SessionLlmRequiredError";

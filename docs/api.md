@@ -1,12 +1,12 @@
-# novel-engine API (0.3.0)
+# novel-engine API (0.4.0)
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
-Stable surface for host apps. Import from `novel-engine` unless noted. The published package only ships `dist/`, `README.md`, and `LICENSE`.
+Stable surface for host apps. Import from `novel-engine` unless noted. The published package only ships `dist/`, `README.md`, and `LICENSE`. Vendored copies import `dist/*.js` by relative path or `"novel-engine": "file:./vendor/novel-engine"` after build — [guide — Install](guide.md#install).
 
 This library is a **pure-frontend ESM SDK**. It does not include UI, React bindings, a Demo SPA, Arbiter full scenes, or ChapterAdvanceGate review UI. Default entries (`.` / `./worker`) do not bundle vendor LLM clients. Optional fetch adapters: [`novel-engine/llm`](llm-adapters.md). Optional host session: [`novel-engine/session`](session.md). `src/` never imports `node:fs` / `node:path`.
 
-Host how-to is grouped by scenario in the [root README](../README.md#usage-by-scenario) ([中文](../README.zh-CN.md#使用场景)). Runnable sources: [`examples/`](../examples/).
+Host how-to: [guide](guide.md) ([中文](guide.zh-CN.md)). Internals: [architecture](architecture.md). Docs index: [README](README.md). Runnable sources: [`examples/`](../examples/).
 
 ## Package entries
 
@@ -15,7 +15,7 @@ Host how-to is grouped by scenario in the [root README](../README.md#usage-by-sc
 | `.` | `dist/index.js` | Engine, `route`, domain types, stores, mocks, main-thread client, book snapshot |
 | `./worker` | `dist/worker.js` | `attachEngineWorker` plus Engine / stores / snapshot for a dedicated worker |
 | `./llm` | `dist/llm.js` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope). Not pulled into `.` or `./worker`. |
-| `./session` | `dist/session.js` | Optional same-thread host session (S0–S4 inspect, generate, auto-write, ChapterRunner, Worker bridge, workspace). Not pulled into `.` / `./worker` / `./llm`. |
+| `./session` | `dist/session.js` | Optional same-thread host session (S0–S6 inspect, generate, auto-write, ChapterRunner, foundation impact, Worker bridge, workspace). Not pulled into `.` / `./worker` / `./llm`. |
 
 ```ts
 import { createEngine, createEngineClient } from "novel-engine";
@@ -46,7 +46,7 @@ const engine = createEngine({ store, llm });
 await engine.run({ prompt: "写一本三章短篇：……" });
 ```
 
-Same-thread mocks: [scenario 1 (short book)](../README.md#scenario-short-book) and [scenario 2 (layered)](../README.md#scenario-layered-book).
+Same-thread mocks: [guide §1 (short book)](guide.md#scenario-short-book) and [guide §2 (layered)](guide.md#scenario-layered-book). `route` internals: [architecture](architecture.md#engine-loop-vs-route).
 
 ## `route` and domain
 
@@ -91,7 +91,7 @@ Hosts implement `LlmPort` against a gateway or WebLLM, or import optional fetch 
 
 `MemoryStore` and `OpfsStore` implement `list()` so snapshot export includes every file. Custom adapters may omit `list`; export then probes the known book layout. Optional `remove(path)` deletes a path (no-op if missing); Session uses it to invalidate a stale foundation audit.
 
-See [scenario 3 (OPFS persist)](../README.md#scenario-opfs).
+See [guide §3 (OPFS persist)](guide.md#scenario-opfs). Write strategy: [architecture](architecture.md#opfs-write-strategy).
 
 ## Book snapshot
 
@@ -107,7 +107,7 @@ See [scenario 3 (OPFS persist)](../README.md#scenario-opfs).
 
 Zip is built with [fflate](https://github.com/101arrowz/fflate) (browser build). Temp files matching `.*.tmp` are skipped.
 
-See [scenario 5 (book snapshot)](../README.md#scenario-snapshot).
+See [guide §5 (book snapshot)](guide.md#scenario-snapshot). Format: [architecture](architecture.md#snapshot-format).
 
 ## Mock LLM
 
@@ -121,7 +121,7 @@ Tests and the short/layered mock books use these only — no live providers.
 
 ## Optional vendor LLM (`novel-engine/llm`)
 
-Not part of `.` or `./worker`. Fetch-based; no `openai` / `@anthropic-ai/sdk` dependency. Guide: [llm-adapters.md](llm-adapters.md) ([中文](llm-adapters.zh-CN.md)). Scenario: [README §6](../README.md#scenario-llm).
+Not part of `.` or `./worker`. Fetch-based; no `openai` / `@anthropic-ai/sdk` dependency. Guide: [llm-adapters.md](llm-adapters.md) ([中文](llm-adapters.zh-CN.md)). How-to: [guide §6](guide.md#scenario-llm).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
@@ -139,12 +139,12 @@ Sketch: [`examples/llm-openai.ts`](../examples/llm-openai.ts).
 
 ## Optional host session (`novel-engine/session`)
 
-Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, S3 ChapterRunner, S4 Worker bridge, and multi-book workspace. Guide: [session.md](session.md) ([中文](session.zh-CN.md)). Scenario: [README §7](../README.md#scenario-session) · [README §8](../README.md#scenario-session-worker).
+Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert/auto-write, S3 ChapterRunner, S4 Worker bridge, S5/S6 foundation impact, and multi-book workspace. Contracts: [session.md](session.md) ([中文](session.zh-CN.md)). How-to: [guide §7](guide.md#scenario-session) ([assess](guide.md#scenario-session-impact-assess) · [meta](guide.md#scenario-session-impact-meta) · [forward](guide.md#scenario-session-impact-forward) · [confirm](guide.md#scenario-session-impact-confirm) · [batch](guide.md#scenario-session-impact-batch)) · [guide §8.1](guide.md#scenario-session-worker-impact). Internals: [architecture](architecture.md#session-bridge-session_protocol).
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `createNovelSession({ store, llm?, bookId })` | fn | Same-thread session. `llm` required for S2 generate / auto-write and S3 `chapter.write`. |
-| `NovelSession` | type | Inspect + `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter` / `subscribe` / snapshot wrappers / `close`. |
+| `createNovelSession({ store, llm?, bookId })` | fn | Same-thread session. `llm` required for S2 generate / auto-write, S3 `chapter.write`, and S6 `rewriteChapters`. |
+| `NovelSession` | type | Inspect + `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `chapter` / `subscribe` / snapshot wrappers / `close`. |
 | `createNovelWorkspace({ createStore, llm?, indexStore? })` | fn | One store per `bookId`. Optional `indexStore` persists `_index.json`. |
 | `NovelWorkspace` | type | `createBook` / `open` / `switchTo` / `listBooks` / `close` / `currentBookId`. |
 | `createSessionClient(port, { bookId })` | fn | S4 main-thread `NovelSession` over messages. |
@@ -152,15 +152,16 @@ Not part of `.`, `./worker`, or `./llm`. Same-thread inspect, S2 generate/upsert
 | `SESSION_PROTOCOL` / `SESSION_NS` / `isSessionCommand` / `isSessionNotice` | const / fn | Session protocol (`v: 1`, `ns: "session"`). |
 | `FoundationMeta` / `FoundationGap` / `InspectResult` / `PlanningInfo` | types | Inspect payload. Gaps include bilingual hints. |
 | `FoundationPatch` / `FoundationKey` / `FOUNDATION_KEYS` / `GenerateFoundationOptions` / `StartAutoWriteOptions` / `AutoWriteResult` / `SessionEvent` | types | S2 generate / auto-write. |
+| `FoundationImpactAssessment` / `FoundationImpactSeverity` / `FoundationImpactMode` / `FOUNDATION_IMPACT_SEVERITIES` / `FOUNDATION_IMPACT_MODES` / `AssessFoundationImpactOptions` / `ApplyFoundationChangeOptions` / `ApplyFoundationChangeResult` | types / const | S5 assess + S6 apply. Severity: `meta_only` / `forward_only` / `rewrite_needed`. Mode: `none` / `polish` / `rewrite`. |
 | `ChapterRunner` / `ChapterView` / `ChapterWriteInput` / `ChapterWriteResult` / `ChapterWriteMode` / `CHAPTER_WRITE_MODES` | type / const | S3 ChapterRunner. Modes: `create` / `continue` / `rewrite` / `polish`. |
 | `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`. |
 | `SessionLlmRequiredError` / `FoundationGenerateError` | class | Missing `llm`; bad generate JSON / keys. |
-| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` already in flight (including over the bridge). |
+| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` / `applyFoundationChange` already in flight (including over the bridge). |
 | `ChapterConflictError` / `ChapterRunnerError` | class | Chapter mode precondition; writer loop / `saveFinal` failure. |
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | Closed session/workspace; unknown `bookId`. |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`. |
 
-`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). On the Worker bridge it runs **in the worker** (the book store lives there). `fill_missing` (default) only upserts keys that are still gaps. `chapter.write` is a dedicated writer loop (MockLlm `toolCalls`); it does not run `Engine.run` or drive `pendingRewrites`. Worker `LlmPort` should `fetch` a host BFF — **do not embed vendor keys**.
+`generateFoundation` asks `LlmPort.complete` for **JSON in `text`** (no new tools). On the Worker bridge it runs **in the worker**. `assessFoundationImpact(patch)` evaluates a **proposed** patch — call it **before** apply/upsert. `applyFoundationChange` is a two-step confirm gate for `rewrite_needed` (`confirmRewrite: true` never returns `needs_confirm`). Provided arrays replace the whole file. Chapters rewrite only when `rewriteChapters: true` and mode is `"rewrite"` | `"polish"`. How-to: [guide §7.2a–e](guide.md#scenario-session-impact) · [§8.1](guide.md#scenario-session-worker-impact). Pitfalls: [guide](guide.md#pitfalls). `chapter.write` is a dedicated writer loop (not `Engine.run` / not `pendingRewrites`). Worker `LlmPort` should `fetch` a host BFF.
 
 Sketches: [`examples/session-workspace.ts`](../examples/session-workspace.ts) (same-thread) · [`examples/session-host.ts`](../examples/session-host.ts) (Worker).
 
@@ -186,7 +187,7 @@ From `novel-engine/worker`:
 
 Commands: `start`, `steer`, `pause`, `resume`, `snapshot`. Notices: `event`, `snapshot`, `error`.
 
-See [scenario 4 (Web Worker)](../README.md#scenario-worker).
+See [guide §4 (Web Worker)](guide.md#scenario-worker). Protocol: [architecture](architecture.md#engine-worker-protocol-engine_protocol).
 
 ## Advanced store helpers
 

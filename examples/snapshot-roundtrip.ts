@@ -1,6 +1,6 @@
 /**
  * Scenario 5 — book snapshot export / import.
- * 场景 5：书稿快照导入导出。Root README: Usage by scenario / 使用场景.
+ * 场景 5：书稿快照导入导出。Host guide: docs/guide.md §5 / docs/guide.zh-CN.md.
  *
  * Book snapshot export / import round-trip (browser-safe zip via fflate).
  * 书籍快照：把 StorePort 里的全部路径打成 zip，再 merge 进另一个 store。

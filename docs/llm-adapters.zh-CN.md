@@ -4,6 +4,8 @@
 
 基于 `fetch` 的 `LlmPort` 实现，覆盖 **OpenAI**、**Anthropic**、**DashScope**（阿里云，OpenAI 兼容模式）。请从**可选**子路径导入，这样供应商 HTTP 客户端不会进入默认的 `novel-engine` / `novel-engine/worker` 包。
 
+宿主怎么用：[指南 §6](guide.zh-CN.md#scenario-llm)。实现概览：[架构](architecture.zh-CN.md)。文档索引：[README](README.zh-CN.md)。
+
 ```ts
 import { createEngine, MemoryStore } from "novel-engine";
 import { createOpenAiLlm } from "novel-engine/llm";
@@ -21,9 +23,7 @@ import { createOpenAiLlm } from "novel-engine/llm";
 
 ## 安装 / 导入
 
-```bash
-npm install novel-engine
-```
+与根包相同：拷进 `vendor/novel-engine/` 后导入 `dist/llm.js`（或构建后 `"file:./vendor/novel-engine"`），或登记处 `npm install novel-engine`。见 [指南 — 安装](guide.zh-CN.md#install)。然后：
 
 ```ts
 import {
@@ -35,7 +35,7 @@ import {
 } from "novel-engine/llm";
 ```
 
-`package.json` 的 `exports` 把 `novel-engine/llm` 映射到 `dist/llm.js`。发布的 `files` 仍是 `dist/`、`README.md`、`LICENSE`。
+`package.json` 的 `exports` 把 `novel-engine/llm` 映射到 `dist/llm.js`。打包 `files` 仍是 `dist/`、`README.md`、`LICENSE`。
 
 ## 工厂函数
 

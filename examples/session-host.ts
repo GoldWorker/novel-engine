@@ -7,7 +7,8 @@
  *
  * Protocol (`SESSION_PROTOCOL === 1`, `ns: "session"`):
  *   main → worker:  inspectFoundation | getFoundation | upsertFoundation |
- *                   generateFoundation | startAutoWrite | chapterGet |
+ *                   generateFoundation | assessFoundationImpact |
+ *                   applyFoundationChange | startAutoWrite | chapterGet |
  *                   chapterSaveFinal | chapterWrite | …
  *   worker → main:  result | event | error
  *
@@ -37,6 +38,26 @@ export async function demoSessionHost(): Promise<void> {
     requireConfirmGaps: true,
   });
   console.log(inspected.readyToWrite, outcome.status, SESSION_PROTOCOL);
+  session.close();
+}
+
+/** 8.1 — two-step applyFoundationChange confirm gate over createSessionClient. */
+export async function demoAssessApplyOnWorker(): Promise<void> {
+  const { session } = connectSession(new URL("./session.worker.ts", import.meta.url));
+  const patch = { characters: [{ name: "林深", role: "主角" }] }; // whole-file replace
+  const assessment = await session.assessFoundationImpact(patch);
+  // assessment.severity / suggestedChapters / suggestedMode / reasons — UI thread, no write
+
+  let outcome = await session.applyFoundationChange({ patch });
+  if (outcome.status === "needs_confirm") {
+    // show outcome.assessment.reasons — store unchanged
+    outcome = await session.applyFoundationChange({
+      patch,
+      confirmRewrite: true,
+      rewriteChapters: false, // host opt-in on the worker too; never auto-rewrite
+    });
+  }
+  console.log(assessment.severity, outcome.status, SESSION_PROTOCOL);
   session.close();
 }
 
