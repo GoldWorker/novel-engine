@@ -54,6 +54,8 @@
     "test": "vitest run",
     "test:short": "vitest run tests/engine.short-book.test.ts",
     "test:layered": "vitest run tests/engine.layered-book.test.ts",
+    "test:smoke": "vitest run tests/smoke",
+    "test:browser": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -72,6 +74,7 @@
   },
   "homepage": "https://github.com/GoldWorker/novel-engine#readme",
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "tsup": "^8.5.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"

@@ -20,7 +20,7 @@ This README is the host landing: **usage scenarios** (install → write → chan
 
 ## 1. Usage scenarios
 
-Each section is a job a host actually runs. Snippets use **`NovelKit`**. Session / Engine appear only where Kit cannot (scripted Engine mocks, host-owned workers). Copy a runnable file from [`examples/`](examples/) when you need the full mock LLM. `examples/` is documentation — not part of `npm test`.
+Each section is a job a host actually runs. Snippets use **`NovelKit`**. Session / Engine appear only where Kit cannot (scripted Engine mocks, host-owned workers). Copy a runnable file from [`examples/`](examples/) when you need the full mock LLM. `examples/` is documentation — not part of `npm test`. In-repo scenario walks: [`npm run test:smoke`](docs/smoke.md) (MockLlm) and `npm run test:browser` (shipped worker).
 
 Audited mid-story confirm-gate flows (assess only, meta-only, forward-only, rewrite confirm, batch chapter sync): [guide §7.2a–e](docs/guide.md#scenario-session-impact). Session names there map 1:1 onto Kit (`assessFoundationImpact` → `assessFoundation`, `applyFoundationChange` → `applyFoundation`).
 
@@ -528,12 +528,17 @@ npm install
 npm test
 npm run test:short
 npm run test:layered
+npm run test:smoke
 npm run typecheck
 npm run build
+npx playwright install --with-deps chromium   # once; CI does this too
+npm run test:browser                          # needs dist/ from build
 npx tsc -p tsconfig.examples.json
 ```
 
-Tests use **mock fixtures only** — no network, no live providers, no real OPFS. Vendor adapter suites mock `fetch`.
+`npm test` is Node **vitest** (unit/contract + README scenario smoke). It does **not** launch a browser. Playwright worker smoke (`test:browser`) loads built `dist/kit.js` + shipped `dist/novel-kit.worker.js` against a local mock BFF — no vendor keys. Host Next.js / 《写作工作台》 E2E stays out of this repo: [smoke vs host E2E](docs/smoke.md).
+
+Tests use **mock fixtures only** — no network, no live providers. Vendor adapter suites mock `fetch`. Browser smoke may use real OPFS in Chromium, or Kit's documented Memory fallback if OPFS is missing.
 
 Hand-authored JSON fixtures live in `fixtures/`:
 

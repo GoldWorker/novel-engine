@@ -2,7 +2,7 @@
 
 可跑通的 TypeScript 源码，索引在 **[宿主指南](../docs/guide.zh-CN.md)**（[English](../docs/guide.md)）。根目录 [README](../README.zh-CN.md) 是宿主落地页（使用场景 + Kit API 目录、本目录）；实现细节在 [架构](../docs/architecture.zh-CN.md)。
 
-这些文件按真实应用的方式导入 `novel-engine` / `novel-engine/worker`。它们是**文档**（不进入 `npm test`）；仓库内可跑通的 mock 仍是 `npm test`、`npm run test:short`、`npm run test:layered`。
+这些文件按真实应用的方式导入 `novel-engine` / `novel-engine/worker`。它们是**文档**（不进入 `npm test`）；仓库内可跑通的 mock 仍是 `npm test`、`npm run test:smoke`、`npm run test:short`、`npm run test:layered`。浏览器 worker 冒烟：`npm run test:browser`（[冒烟 vs 宿主 E2E](../docs/smoke.zh-CN.md)）。
 
 不要在这里重复怎么用——指南才是枢纽。本目录是深链目标。
 

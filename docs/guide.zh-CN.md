@@ -6,7 +6,7 @@
 
 契约（导出、Session S0–S6、错误）：[api](api.zh-CN.md)。实现（`route`、协议、store 布局、Kit init 握手）：[架构](architecture.zh-CN.md)。文档索引：[README](README.zh-CN.md)。
 
-`examples/` 是文档，不进入 `npm test`。仓库内 mock：`npm run test:short` 与 `npm run test:layered`。
+`examples/` 是文档，不进入 `npm test`。仓库内 mock：`npm run test:short`、`npm run test:layered`，以及 README 任务冒烟 `npm run test:smoke`。浏览器 worker 冒烟（构建产物 `dist/`）：`npm run test:browser`。宿主工作台 E2E 不在本仓库：[冒烟 vs 宿主 E2E](smoke.zh-CN.md)。
 
 <a id="install"></a>
 

@@ -20,5 +20,6 @@
     "rootDir": ".",
     "types": []
   },
-  "include": ["src", "tests", "fixtures"]
+  "include": ["src", "tests", "fixtures"],
+  "exclude": ["tests/browser"]
 }
