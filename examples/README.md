@@ -12,7 +12,7 @@ Do not duplicate the how-to here — the guide is the hub. This folder is the de
 
 | Scenario (guide) | File |
 | --- | --- |
-| [0. NovelKit (recommended)](../docs/guide.md#scenario-kit) | [`kit-host.ts`](kit-host.ts) |
+| [0. NovelKit (recommended)](../docs/guide-kit.md) | [`kit-host.ts`](kit-host.ts) |
 | [1. Short book to complete](../docs/guide.md#scenario-short-book) | [`short-book.ts`](short-book.ts) |
 | [2. Layered mid / long book](../docs/guide.md#scenario-layered-book) | [`layered-book.ts`](layered-book.ts) |
 | [3. Persist in the browser (OPFS)](../docs/guide.md#scenario-opfs) | [`opfs-store.ts`](opfs-store.ts) |
@@ -22,7 +22,7 @@ Do not duplicate the how-to here — the guide is the hub. This folder is the de
 | [7. Host session](../docs/guide.md#scenario-session) | [`session-workspace.ts`](session-workspace.ts) (incl. [7.2a–7.2e](../docs/guide.md#scenario-session-impact) assess / apply) |
 | [8. Session over Worker](../docs/guide.md#scenario-session-worker) | [`session.worker.ts`](session.worker.ts) + [`session-host.ts`](session-host.ts) (incl. [8.1](../docs/guide.md#scenario-session-worker-impact)) |
 
-Worker embed needs **both** files. Replace the `LlmPort` stub in the worker file with a gateway, WebLLM, or `novel-engine/llm` behind a BFF. See [guide — LLM adapters](../docs/guide.md#scenario-llm).
+Worker embed needs **both** files. Replace the `LlmPort` stub in the worker file with a gateway, WebLLM, or `novel-engine/llm` behind a BFF. See [docs/llm-adapters.md](../docs/llm-adapters.md).
 
 Optional typecheck from this repo (path-maps `novel-engine` → `src/`):
 

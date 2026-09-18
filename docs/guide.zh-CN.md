@@ -2,9 +2,7 @@
 
 [English](guide.md) | [中文文档](guide.zh-CN.md)
 
-给宿主应用的「怎么用」。**Kit 是默认路径。** Engine 与 Session 是进阶用法。先复制片段，再打开链接里的 `examples/*.ts` 看完整可跑文件。
-
-契约（导出、Session S0–S6、错误）：[api](api.zh-CN.md)。实现（`route`、协议、store 布局、Kit init 握手）：[架构](architecture.zh-CN.md)。文档索引：[README](README.zh-CN.md)。
+给宿主应用的「怎么用」。先复制片段，再打开链接里的 `examples/*.ts` 看完整可跑文件。实现细节（`route`、协议、store 布局）：[架构](architecture.zh-CN.md)。契约：[api](api.zh-CN.md) · [session](session.zh-CN.md)。文档索引：[README](README.zh-CN.md)。
 
 `examples/` 是文档，不进入 `npm test`。仓库内 mock：`npm run test:short` 与 `npm run test:layered`。
 
@@ -105,255 +103,16 @@ npm install novel-engine
 
 打包实现：[架构](architecture.zh-CN.md#打包exports--本地引用)。
 
-<a id="scenario-kit"></a>
+## 快速开始
 
-## NovelKit（推荐）
-
-开箱即用的宿主门面。**只有 `NovelKit.create`**（没有 `new` + `init`）。默认 **OPFS + Worker**。包装箱**自带** `dist/novel-kit.worker.js`，宿主不必再维护一份 Worker 源码。
-
-Session（`novel-engine/session`）仍是参考实现。Kit 只做组合 + 默认值 + 随包装箱发布的 Worker。业务规则（确认闸门、整表替换、`rewriteChapters` 默认 false、会话中途不换 LLM）仍在 Session 上。
-
-契约：[api](api.zh-CN.md#optional-novelkit-novel-enginekit)。实现 / init 握手：[架构](architecture.zh-CN.md#kit-worker-init)。可复制的 Session 流程：[进阶：Session](#scenario-session)。
-
-### 默认值
-
-| 选项 | 默认 | 如何关掉 |
-| --- | --- | --- |
-| `store` | `"opfs"` | `"memory"`（Node/测试）或传入 `StorePort`（仅 `runtime: "main"`） |
-| `runtime` | `"worker"` | `"main"`（Node/测试） |
-| `workspace` | `true` | `false` — `createBook` / `switchBook` / `listBooks` 会抛错 |
-| `bookId` | `"default"` | 传入非空字符串 |
-| `llmEndpoint` | `"/api/llm"` | 你的 BFF 路由 |
-| `fallbackToMemory` | `true` | `false`：没有 OPFS 时抛 `OpfsUnavailableError` |
-
-实例只读：`bookId`、`storeKind`（`"opfs"` \| `"memory"` \| `"custom"`）、`runtime`。
-
-### 浏览器（默认 OPFS + Worker）
+**开箱（浏览器工作台推荐）：** [`novel-engine/kit`](guide-kit.zh-CN.md) — `NovelKit.create`、自带 Worker、默认 OPFS + Worker。Node/测试：`runtime: "main"` + `store: "memory"`。
 
 ```ts
 import { NovelKit } from "novel-engine/kit";
-// 相对 dist：
-// import { NovelKit } from "../../vendor/novel-engine/dist/kit.js";
 
-const kit = await NovelKit.create({
-  llmEndpoint: "/api/llm", // worker 的 LlmPort.complete → fetch(llmEndpoint)。Worker 里不要放 API Key。
-  // 省略 bookId → "default"
-});
-
+const kit = await NovelKit.create({ llmEndpoint: "/api/llm" });
 const { gaps, readyToWrite } = await kit.inspect({ prompt: "写一本三章短篇" });
-await kit.fillFoundation({ book: { title: "无主的信", synopsis: "灯塔与潮" } });
-const outcome = await kit.startBook({
-  prompt: "写一本三章短篇：……",
-  generateMissing: true, // 可能返回 { status: "needs_foundation", gaps }
-});
-
-kit.subscribe((event) => {
-  console.log(event.type);
-});
-kit.dispose(); // 关闭 session 并 terminate Worker
 ```
-
-Worker 模式下即使传入 `llm` **也会被忽略**——Worker 始终使用 `llmEndpoint`。只在 `runtime: "main"` 时传 `llm`。供应商密钥放在 BFF——见 [安全](#security)。
-
-规范示意：[`examples/kit-host.ts`](../examples/kit-host.ts)。
-
-### Node / 测试（main + memory）
-
-`runtime: "main"` **必须**传 `llm`。
-
-```ts
-import { MockLlm } from "novel-engine";
-import { NovelKit } from "novel-engine/kit";
-
-const kit = await NovelKit.create({
-  runtime: "main",
-  store: "memory",
-  llm: new MockLlm([{ text: JSON.stringify({ premise: "……" }) }]),
-  bookId: "letter",
-});
-```
-
-### 随包装箱发布的 Worker URL
-
-`NovelKit.create` 的解析方式：
-
-```ts
-new URL("./novel-kit.worker.js", import.meta.url); // 相对 dist/kit.js
-```
-
-把 `dist/` 整目录 vendoring / `file:` 拷贝时这样就能工作。如果打包器改写了 `import.meta.url` 导致 Worker 404，把 `node_modules/novel-engine/dist/novel-kit.worker.js`（或 `vendor/.../dist/novel-kit.worker.js`）拷进宿主的 **`public/`**（或等价目录），再传 `workerUrl`：
-
-```ts
-await NovelKit.create({
-  workerUrl: "/novel-kit.worker.js",
-  llmEndpoint: "/api/llm",
-});
-```
-
-**不必**为 Kit 手写 session Worker。发布文件已经在 **init** 握手之后运行 `attachSessionWorker` + `createNovelSession` + OPFS/memory。Init 协议：[架构](architecture.zh-CN.md#kit-worker-init)。
-
-### Worker 上的 LLM
-
-create 时，主线程先发 **init**（`ns: "kit"`），带上 `llmEndpoint`、`bookId`、OPFS 选项，等到 **ready**，再挂上现有的 Session 桥（`ns: "session"`）。Worker 的 `LlmPort.complete` 就是 `fetch(llmEndpoint)`，body 为 completion 请求 JSON。供应商密钥放在 BFF，不要放进 Worker。
-
-### 场景方法
-
-名称一一对应 Session（不重写业务规则）：
-
-| Kit | Session |
-| --- | --- |
-| `inspect` | `inspectFoundation` |
-| `assertReady` | `assertReadyToWrite` |
-| `fillFoundation` | `upsertFoundation` |
-| `generateFoundation` | `generateFoundation` |
-| `startBook` | `startAutoWrite` |
-| `assessFoundation` | `assessFoundationImpact` |
-| `applyFoundation` | `applyFoundationChange` |
-| `getChapter` / `writeChapter` / `saveChapter` | `chapter.get` / `write` / `saveFinal` |
-| `getMeta` / `getProgress` / `listArtifacts` | `getFoundation` / `getProgress` / `listArtifacts` |
-| `createBook` / `switchBook` / `listBooks` | 工作区 API |
-| `exportBook` / `importBook` | `exportSnapshot` / `importSnapshot` |
-| `subscribe` / `dispose` | `subscribe` / `close`（外加 `worker.terminate`） |
-
-保持不变的 Session 行为：
-
-- 对**拟议**补丁先 `assessFoundation`，再 `applyFoundation` / `fillFoundation`。
-- `applyFoundation` 不带 `confirmRewrite` 时，若严重度为 `rewrite_needed` 则返回 `{ status: "needs_confirm" }`。`confirmRewrite: true` 不会得到 `needs_confirm`。请用**两步** apply。
-- `characters` / `worldRules` / `outline` / `layeredOutline` 是**整文件替换**。
-- `rewriteChapters` 默认 **false**——章节不会自动改写。`rewriteChapters: true` 且 `suggestedMode === "none"` 时不会写章，除非宿主再传 `mode: "rewrite" | "polish"`。
-- 调用 `latestCompleted` / `nextChapter` 前先判断 `getProgress()` 是否为 null。
-- 会话中途不换 LLM（Worker 的 endpoint 在 init 时定死）。
-
-`startBook` 在默认 `requireConfirmGaps: true` 时，可能返回 `{ status: "needs_foundation" }` 而不跑 `Engine.run`。
-
-`workspace: false`（或自定义 `StorePort`）时，多书方法会抛出明确的 `KitWorkspaceDisabledError`。
-
-Kit 上的两步 `rewrite_needed`：
-
-```ts
-const patch = { characters: [{ name: "林深", role: "主角" }] }; // 整表替换
-
-const assessment = await kit.assessFoundation(patch);
-// assessment.severity / suggestedChapters / suggestedMode / reasons — 不写盘
-
-let outcome = await kit.applyFoundation({ patch });
-if (outcome.status === "needs_confirm") {
-  // 展示 outcome.assessment.reasons — store 未改
-  outcome = await kit.applyFoundation({
-    patch,
-    confirmRewrite: true,    // 宿主已确认影响范围
-    rewriteChapters: false,  // 仍然不会自动改写章节，除非宿主显式选择
-  });
-}
-```
-
-同一套已审计流程的 Session 名称：[7.2a–7.2e](#scenario-session-impact)。
-
-### Kit 不是什么
-
-- 不是第二份 Engine，也不是第二份 Session。底层 Session / Engine / Session Worker 协议保持现状。
-- 不是 `novel-engine/worker`（那是 Engine Worker）。Kit 的 Worker 是 `novel-engine/kit/worker`。
-- CI 不需要真实 OPFS——测试走 `runtime: "main"` + `store: "memory"`，以及假 port 上的 init 接线。
-
-常见坑（先评估拟议补丁、整表替换、`getProgress()` 为 null）：[下文](#pitfalls)。
-
-<a id="scenario-llm"></a>
-
-## LLM 适配器（`novel-engine/llm`）
-
-**何时：** 受信任的 Node 宿主、Electron 或 **服务端 BFF** 需要真实 `LlmPort`。不要把原始 API Key 打进公开 SPA。
-
-可选子路径。基于 fetch 的 OpenAI / Anthropic / DashScope 适配器，这样供应商 HTTP 客户端不会进入默认的 `novel-engine` / `novel-engine/worker` 包。**没有** `openai` / `@anthropic-ai/sdk` 依赖。适配器调用 `fetch`（可注入）。Node ≥18 与现代浏览器已自带。
-
-导出：[api](api.zh-CN.md#optional-vendor-llm-novel-enginellm)。示意：[`examples/llm-openai.ts`](../examples/llm-openai.ts)。
-
-```ts
-import {
-  createOpenAiLlm,
-  createAnthropicLlm,
-  createDashScopeLlm,
-  createVendorLlm,
-  LlmAdapterError,
-} from "novel-engine/llm";
-```
-
-公共选项：`apiKey`、`model`，可选 `baseUrl`、`fetch`、`headers`。
-
-| 工厂 | 默认 `baseUrl` | 鉴权 | HTTP |
-| --- | --- | --- | --- |
-| `createOpenAiLlm` | `https://api.openai.com/v1` | `Authorization: Bearer` | `POST {baseUrl}/chat/completions` |
-| `createAnthropicLlm` | `https://api.anthropic.com` | `x-api-key` + `anthropic-version` | `POST {baseUrl}/v1/messages` |
-| `createDashScopeLlm` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 与 OpenAI 相同 | 与 OpenAI 相同 |
-| `createVendorLlm({ provider, ... })` | 见上 | 见上 | 见上 |
-
-`createDashScopeLlm` **复用** OpenAI 形态的客户端。新加坡 / 美国等区域请传 `baseUrl`（必须包含 `/compatible-mode/v1`）。例如：`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`。
-
-Anthropic 额外选项：`maxTokens`（默认 `4096`）、`anthropicVersion`（默认 `2023-06-01`）。HTTP 失败抛 `LlmAdapterError`（`status?`、`body?`）。
-
-### 映射
-
-`LlmCompletionRequest` → 供应商 chat/tools：
-
-- **消息** — `system` / `user` / `assistant` / `tool`（`toolCallId`、`name`）
-- **工具** — Engine 的 spec 只有 `{ name, description }`。适配器发送宽松的 JSON object schema（`additionalProperties: true`）
-- **`agent`** — Engine 用来路由/打日志；**不会**作为供应商请求体字段转发（多余字段可能 400）
-
-供应商响应 → `LlmCompletionResult`：
-
-- 助手文本（模型只发 tool call 时为空字符串）
-- `toolCalls[]`：`id`、`name`，以及解析成**对象**的 `arguments`（OpenAI 的 JSON 字符串与 Anthropic 的 `input` 对象都会归一）
-
-Engine 的工具轮次会发送**不带**内嵌 `tool_calls` 的 assistant 消息，再跟 `role: "tool"` 结果。适配器会根据后续 tool 消息重建供应商要求的 assistant `tool_calls` / `tool_use`，好让下一轮合法。
-
-### 同线程宿主
-
-```ts
-import { createEngine, MemoryStore } from "novel-engine";
-import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
-
-const llm = createOpenAiLlm({
-  apiKey: "sk-replace-me", // BFF / 受信任宿主环境 — 绝不是公开 SPA
-  model: "gpt-4o-mini",
-});
-// createAnthropicLlm({ apiKey, model: "claude-sonnet-4-20250514" })
-// createDashScopeLlm({ apiKey, model: "qwen-plus" })
-// createVendorLlm({ provider: "dashscope", apiKey, model: "qwen-plus" })
-
-const engine = createEngine({ store: new MemoryStore(), llm });
-await engine.run({ prompt: "写一本三章短篇：……" });
-```
-
-### BFF / Worker
-
-公开 UI 时不要让 Worker 包携带密钥。Kit 已经 `fetch(llmEndpoint)`。宿主自有的 Engine Worker 优先走同源 BFF：
-
-```ts
-import { attachEngineWorker } from "novel-engine/worker";
-import type { LlmPort } from "novel-engine/worker";
-
-const llm: LlmPort = {
-  async complete(request) {
-    const response = await fetch("/api/novel-llm", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(request),
-    });
-    return response.json();
-  },
-};
-
-attachEngineWorker(self, {
-  async createPorts() {
-    return { store: /* OpfsStore */, llm };
-  },
-});
-```
-
-BFF 再用服务端密钥调用 `createOpenAiLlm` / `createDashScopeLlm` / `createAnthropicLlm`。
-
-不包含：流式输出、视觉、供应商 SDK 包、把密钥放进本仓库、在 novel-engine 内接线 Next.js 应用。
-
-## 进阶：Engine
 
 同线程 Engine + `MemoryStore` + `MockLlm`（包名导入；若 vendoring 且不用 `file:`，改用上面的相对 `dist/` 路径）：
 
@@ -370,7 +129,23 @@ const engine = createEngine({
 const result = await engine.run({ prompt });
 ```
 
-`plan_start` 是关键词桩：`长篇` → long，`中篇`/`分层` → mid，否则 short。
+同线程 Session（可选 `novel-engine/session`）：
+
+```ts
+import { MemoryStore } from "novel-engine";
+import { createNovelSession } from "novel-engine/session";
+
+const session = await createNovelSession({
+  store: new MemoryStore(),
+  llm, // 只检查 / S5 启发式时可省略
+  bookId: "letter",
+});
+const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "写一本三章短篇" });
+```
+
+`plan_start` 是关键词桩：`长篇` → long，`中篇`/`分层` → mid，否则 short。供应商密钥放在 BFF——见 [安全](#security)。
+
+## Engine 场景
 
 | 场景 | 何时 | 源码 |
 | --- | --- | --- |
@@ -379,8 +154,9 @@ const result = await engine.run({ prompt });
 | [3. OPFS 持久化](#scenario-opfs) | 刷新后产物还在 | [`opfs-store.ts`](../examples/opfs-store.ts) |
 | [4. Engine Worker](#scenario-worker) | 循环离开 UI 线程 | [`engine.worker.ts`](../examples/engine.worker.ts) + [`worker-host.ts`](../examples/worker-host.ts) |
 | [5. 书稿快照](#scenario-snapshot) | zip / merge 恢复 store | [`snapshot-roundtrip.ts`](../examples/snapshot-roundtrip.ts) |
+| [6. 真实 LLM 适配器](#scenario-llm) | 经 BFF 使用 OpenAI / Anthropic / DashScope | [`llm-openai.ts`](../examples/llm-openai.ts) |
 
-场景可以组合：Worker 示例已经调用 `createOpfsStore()`；快照适用于任意 `StorePort`。真实 LLM：见[上文](#scenario-llm)。
+场景可以组合：Worker 示例已经调用 `createOpfsStore()`；快照适用于任意 `StorePort`。
 
 <a id="scenario-short-book"></a>
 
@@ -494,9 +270,9 @@ export async function openOrThrow(): Promise<StorePort> {
 
 ### 4. 嵌入 Web Worker
 
-**何时：** Engine 循环不能堵住 UI 线程。除非需要宿主自有的 Engine Worker，否则优先 [Kit](#scenario-kit)。
+**何时：** Engine 循环不能堵住 UI 线程。
 
-Worker 包是**独立入口**。宿主自有的 Worker 文件里注入 `LlmPort`。生产环境优先 BFF（[LLM 适配器](#scenario-llm)）。`pause` / `steer` 在当前 Worker 指令结束后生效。
+Worker 包是**独立入口**。宿主自有的 Worker 文件里注入 `LlmPort`。生产环境优先 BFF（[场景 6](#scenario-llm)）。`pause` / `steer` 在当前 Worker 指令结束后生效。
 
 协议概览：[架构](architecture.zh-CN.md#engine-worker-协议engine_protocol)。完整配对：[`examples/engine.worker.ts`](../examples/engine.worker.ts) + [`examples/worker-host.ts`](../examples/worker-host.ts)。两份都要复制。
 
@@ -508,7 +284,7 @@ import type { LlmPort } from "novel-engine/worker";
 
 const llm: LlmPort = {
   async complete() {
-    // 网关 / WebLLM / 放在 BFF 后的 novel-engine/llm — 见 LLM 适配器
+    // 网关 / WebLLM / 放在 BFF 后的 novel-engine/llm — 见场景 6
     return { text: "", toolCalls: [] };
   },
 };
@@ -581,11 +357,35 @@ try {
 // dest 有快照里的 chapters/01.md；extra/host.json 仍在
 ```
 
-## 进阶：Session
+<a id="scenario-llm"></a>
 
-可选 `novel-engine/session`。同线程检查、生成、中途改设定（评估 → 确认 → 应用）、单章写作、多书工作区。离主线程：[场景 8](#scenario-session-worker)。除非需要直接使用参考 API，否则优先 [Kit](#scenario-kit)。
+### 6. 注入真实 LLM（`novel-engine/llm`）
 
-契约、错误、S0–S6、协议：[api](api.zh-CN.md#optional-host-session-novel-enginesession)。示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)。
+**何时：** 受信任的 Node 宿主、Electron 或 **服务端 BFF** 需要真实 `LlmPort`。不要把原始 API Key 打进公开 SPA。
+
+可选子路径。基于 fetch 的 OpenAI / Anthropic / DashScope 适配器。没有 `openai` / `@anthropic-ai/sdk` 依赖。详情：[llm-adapters.zh-CN.md](llm-adapters.zh-CN.md)。示意：[`examples/llm-openai.ts`](../examples/llm-openai.ts)。
+
+```ts
+import { createEngine, MemoryStore } from "novel-engine";
+import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
+
+const llm = createOpenAiLlm({
+  apiKey: "sk-replace-me", // BFF / 受信任宿主环境 — 绝不是公开 SPA
+  model: "gpt-4o-mini",
+});
+// createAnthropicLlm({ apiKey, model: "claude-sonnet-4-20250514" })
+// createDashScopeLlm({ apiKey, model: "qwen-plus" })
+// createVendorLlm({ provider: "dashscope", apiKey, model: "qwen-plus" })
+
+const engine = createEngine({ store: new MemoryStore(), llm });
+await engine.run({ prompt: "写一本三章短篇：……" });
+```
+
+## Session 宿主流程
+
+可选 `novel-engine/session`。同线程检查、生成、中途改设定（评估 → 确认 → 应用）、单章写作、多书工作区。离主线程：[场景 8](#scenario-session-worker)。
+
+契约与错误：[session.zh-CN.md](session.zh-CN.md)。示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)。
 
 ```ts
 import { MemoryStore } from "novel-engine";
@@ -593,7 +393,6 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 
 const store = new MemoryStore();
 const session = await createNovelSession({ store, llm, bookId: "letter" });
-const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "写一本三章短篇" });
 ```
 
 `generateFoundation` 是 **`LlmPort.complete().text` 里的一次性 JSON**，不是 Engine 循环。`chapter.write` 是**专用作者循环**（不是 `Engine.run` / 不是 `pendingRewrites`）。`assessFoundationImpact` **规则优先**且不写盘。`applyFoundationChange` 除非 `rewriteChapters: true`，否则绝不自动重写章节。
@@ -661,7 +460,7 @@ await session.startAutoWrite({
 
 **补丁形状：** 省略的键保持原样。一旦提供 `characters`、`worldRules`、`outline` 或 `layeredOutline` 数组，就是**整文件替换**——未出现的名字/章节会被删除，不是合并，也不是就地改名。`{ characters: [{ name: "林深" }] }` 会去掉林守。
 
-示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)。Worker 上的同样调用见 [8.1](#scenario-session-worker-impact)。Kit 名称：`assessFoundation` / `applyFoundation`（[上文](#scenario-kit)）。
+示意：[`examples/session-workspace.ts`](../examples/session-workspace.ts)。Worker 上的同样调用见 [8.1](#scenario-session-worker-impact)。
 
 | 任务 | 严重度 | 会改写章节吗？ |
 | --- | --- | --- |
@@ -921,9 +720,9 @@ const restored = await sessionA.getFoundation();
 
 ### 8. Worker 上的 Session（`createSessionClient`）
 
-**何时：** 自动写作 / 章节操作 / 应用设定不能堵住 UI，并且供应商 API Key 必须留在 BFF。除非需要宿主自有的 session Worker，否则优先 [Kit](#scenario-kit)。
+**何时：** 自动写作 / 章节操作 / 应用设定不能堵住 UI，并且供应商 API Key 必须留在 BFF。
 
-从 `novel-engine/session` 导入 `attachSessionWorker`（不要从 `novel-engine/worker`）。`LlmPort.complete` 应 `fetch("/api/llm")`。协议：[架构](architecture.zh-CN.md#session-桥session_protocol) · [api S4](api.zh-CN.md#s4--worker-桥)。
+从 `novel-engine/session` 导入 `attachSessionWorker`（不要从 `novel-engine/worker`）。`LlmPort.complete` 应 `fetch("/api/llm")`。协议：[架构](architecture.zh-CN.md#session-桥session_protocol) · [session S4](session.zh-CN.md#s4--worker-桥)。
 
 配对：[`examples/session.worker.ts`](../examples/session.worker.ts) + [`examples/session-host.ts`](../examples/session-host.ts)。
 
@@ -966,17 +765,15 @@ Busy（`SessionBusyError`）是 Worker 侧 session 标志：进行中的 `applyF
 
 ## 常见坑
 
-- **先评估拟议补丁**：`assessFoundationImpact(patch)` / Kit `assessFoundation(patch)` 必须在 `applyFoundationChange` / `applyFoundation` / `upsertFoundation` / `fillFoundation` **之前**。同一内容已经写入后再评估一次，通常会看起来像「没有变更」。
+- **先评估拟议补丁**：`assessFoundationImpact(patch)` 必须在 `applyFoundationChange` / `upsertFoundation` **之前**。同一内容已经写入后再评估一次，通常会看起来像「没有变更」。
 - **`characters` / `worldRules` / `outline` / `layeredOutline` 是整文件替换。** `{ characters: [{ name: "林深" }] }` 会删掉林守，不是就地改名。想保留的行必须全部带上。
 - **`rewriteChapters: true` 且 `suggestedMode === "none"`**（常见于 `meta_only` / `forward_only`）时不会写章，除非宿主再传 `mode: "rewrite" | "polish"`。
 - **调用 `latestCompleted(progress)` / `nextChapter(progress)` 前先判断 `getProgress()` 是否为 null。**
-- **两步确认：** 先不带 `confirmRewrite` apply；若 `status === "needs_confirm"`，再带 `confirmRewrite: true` 重试。已传 `confirmRewrite: true` 时不会再返回 `needs_confirm`。Kit 的 `applyFoundation` 同样如此。
-- **密钥放在 BFF。** 不要把供应商 API Key 打进公开 SPA 或 Worker 包。Kit Worker 始终使用 `llmEndpoint`。
+- **两步确认：** 先不带 `confirmRewrite` apply；若 `status === "needs_confirm"`，再带 `confirmRewrite: true` 重试。已传 `confirmRewrite: true` 时不会再返回 `needs_confirm`。
+- **密钥放在 BFF。** 不要把供应商 API Key 打进公开 SPA 或 Worker 包。
 
 <a id="security"></a>
 
 ## 安全
 
-**不要把供应商 API Key 放进公开 Web 应用。** 浏览器包如果直连 OpenAI / Anthropic / DashScope，任何人打开开发者工具都能看到密钥。
-
-生产环境（包括 Next.js 工作台）请把密钥留在 BFF，让 Worker `fetch` 该路由。适配器详情：[LLM 适配器](#scenario-llm)。
+**不要把供应商 API Key 放进公开 Web 应用。** 生产环境（包括 Next.js 工作台）请把密钥留在 BFF，让 Worker `fetch` 该路由。适配器详情：[llm-adapters.zh-CN.md](llm-adapters.zh-CN.md)。
