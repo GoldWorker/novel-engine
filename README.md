@@ -4,7 +4,7 @@
 
 Reusable **TypeScript** Novel Engine SDK for hosts that want to generate novels in the browser (or Node tests). Pure ESM, no UI, no React bindings, no TUI.
 
-**0.3.0** adds an optional `novel-engine/session` entry (same-thread inspect + multi-book workspace) and keeps `novel-engine/llm` (fetch adapters for OpenAI, Anthropic, DashScope). Default bundles still ship no vendor clients and do not pull session.
+**0.4.0** adds Session **S5/S6** (`assessFoundationImpact` / `applyFoundationChange`) on the optional `novel-engine/session` entry, and keeps `novel-engine/llm` (fetch adapters for OpenAI, Anthropic, DashScope). Default bundles still ship no vendor clients and do not pull session.
 
 The default `novel-engine` / `novel-engine/worker` entries never talk to a real model. `src/` never uses `node:fs` / `node:path`.
 
@@ -12,12 +12,12 @@ Inspired by the routing model in [voocel/ainovel-cli](https://github.com/voocel/
 
 Stable exports: [docs/api.md](docs/api.md) ([中文 API](docs/api.zh-CN.md)). Session: [docs/session.md](docs/session.md).
 
-**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm) · [host session](#scenario-session) ([gaps](#scenario-session-gaps) · [foundation](#scenario-session-foundation) · [chapter write](#scenario-session-chapter) · [read meta](#scenario-session-read) · [TOC & chapters](#scenario-session-toc) · [switch books](#scenario-session-workspace)) · [session over Worker](#scenario-session-worker). Runnable sources stay in [`examples/`](examples/).
+**How do I use this?** Jump to [Usage by scenario](#usage-by-scenario) — [short book](#scenario-short-book) · [layered mid/long](#scenario-layered-book) · [OPFS persist](#scenario-opfs) · [Web Worker](#scenario-worker) · [book snapshot](#scenario-snapshot) · [real LLM adapters](#scenario-llm) · [host session](#scenario-session) ([gaps](#scenario-session-gaps) · [foundation](#scenario-session-foundation) · [foundation impact](#scenario-session-impact) · [chapter write](#scenario-session-chapter) · [read meta](#scenario-session-read) · [TOC & chapters](#scenario-session-toc) · [switch books](#scenario-session-workspace)) · [session over Worker](#scenario-session-worker). Runnable sources stay in [`examples/`](examples/).
 
 ## What's not included
 
 - Vendor LLM clients in the default `novel-engine` / `novel-engine/worker` bundles — inject `LlmPort`, or import optional [`novel-engine/llm`](docs/llm-adapters.md) (fetch adapters; **do not put API keys in a public browser app**)
-- Host session in the default bundles — import optional [`novel-engine/session`](docs/session.md) (S0–S4 inspect, generate, auto-write, ChapterRunner, Worker bridge, workspace)
+- Host session in the default bundles — import optional [`novel-engine/session`](docs/session.md) (S0–S6 inspect, generate, auto-write, ChapterRunner, foundation impact, Worker bridge, workspace)
 - React package, Demo SPA, or any visual app
 - Arbiter full semantic scenes (`plan_start` is a keyword stub)
 - ChapterAdvanceGate review-mode UI
@@ -75,7 +75,7 @@ Scenarios compose: the Worker example already calls `createOpfsStore()`; snapsho
 | [4. Embed in a Web Worker](#scenario-worker) | Dedicated worker + main-thread client: `start` / `steer` / `pause` / `resume` / `snapshot`. | [`engine.worker.ts`](examples/engine.worker.ts) + [`worker-host.ts`](examples/worker-host.ts) |
 | [5. Book snapshot export / import](#scenario-snapshot) | Zip every store path (fflate) and merge-restore into another `StorePort`. | [`examples/snapshot-roundtrip.ts`](examples/snapshot-roundtrip.ts) |
 | [6. Inject a real LLM](#scenario-llm) | Host-side OpenAI / Anthropic / DashScope `LlmPort` via optional `novel-engine/llm`. Keys belong on a BFF. | [`examples/llm-openai.ts`](examples/llm-openai.ts) |
-| [7. Host session (inspect + generate + ChapterRunner + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace`: [gap check](#scenario-session-gaps), [foundation upsert/generate](#scenario-session-foundation), [single-chapter write](#scenario-session-chapter), [read latest meta](#scenario-session-read), [TOC & chapters](#scenario-session-toc), [switch books / restore](#scenario-session-workspace). | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
+| [7. Host session (inspect + generate + ChapterRunner + impact + workspace)](#scenario-session) | Same-thread `NovelSession` / `NovelWorkspace`: [gap check](#scenario-session-gaps), [foundation upsert/generate](#scenario-session-foundation), [assess / apply foundation change](#scenario-session-impact), [single-chapter write](#scenario-session-chapter), [read latest meta](#scenario-session-read), [TOC & chapters](#scenario-session-toc), [switch books / restore](#scenario-session-workspace). | [`examples/session-workspace.ts`](examples/session-workspace.ts) |
 | [8. Session over Worker](#scenario-session-worker) | Workbench: `startAutoWrite` / `chapter.write` off the UI thread. `createSessionClient` + `attachSessionWorker`. `LlmPort` fetches a BFF — no vendor keys in the worker. | [`session.worker.ts`](examples/session.worker.ts) + [`session-host.ts`](examples/session-host.ts) |
 
 `plan_start` is a **deterministic stub** (no Arbiter LLM): prompts containing `长篇` pick `architect_long` / `long`; `中篇` or `分层` pick `architect_long` / `mid`; otherwise `architect_short` / `short`. Worker failures retry once, then pause. Identical Route instructions five times also pause (deadlock cap).
@@ -336,7 +336,7 @@ await engine.run({ prompt: "写一本三章短篇：……" });
 
 **When:** A same-thread host wants to inspect whether a store is ready to write, fill foundation via a structured LLM JSON call, write or rewrite a single chapter, or switch among several books.
 
-Optional subpath. S0–S3: `getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. `generateFoundation` is **one-shot JSON in `LlmPort.complete().text`**, not an Engine loop. `chapter.write` is a **dedicated writer loop** (reuses writer tools; not `Engine.run` / not `pendingRewrites`). `startAutoWrite` and `chapter.write` share a busy flag (`SessionBusyError`). Worker off-thread: [scenario 8](#scenario-session-worker).
+Optional subpath. S0–S6: `getFoundation` / `inspectFoundation` / `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `chapter.get` / `chapter.saveFinal` / `chapter.write` / workspace `createBook` / `switchTo`. Mid/long books with a valid `layered_outline.json` no longer need a flat `outline.json`. `generateFoundation` is **one-shot JSON in `LlmPort.complete().text`**, not an Engine loop. `chapter.write` is a **dedicated writer loop** (reuses writer tools; not `Engine.run` / not `pendingRewrites`). `assessFoundationImpact` is **rules-first** and does not mutate. `applyFoundationChange` never auto-rewrites chapters unless `rewriteChapters: true`. `startAutoWrite`, `chapter.write`, and `applyFoundationChange` share a busy flag (`SessionBusyError`). Worker off-thread: [scenario 8](#scenario-session-worker).
 
 Details: [docs/session.md](docs/session.md) ([中文](docs/session.zh-CN.md)). Sketch: [`examples/session-workspace.ts`](examples/session-workspace.ts).
 
@@ -401,7 +401,31 @@ await session.startAutoWrite({
 });
 ```
 
-Fingerprint file changes invalidate `foundation_audit`. Mid/long can supply `layeredOutline` instead of flat `outline`.
+Fingerprint file changes invalidate `foundation_audit`. Mid/long can supply `layeredOutline` instead of flat `outline`. Mid-story foundation upsert/generate is allowed anytime; chapters do **not** auto-rewrite — assess first ([7.2a](#scenario-session-impact)).
+
+<a id="scenario-session-impact"></a>
+
+#### 7.2a Assess foundation impact, then apply with a confirm gate
+
+After a mid-story foundation edit, call `assessFoundationImpact` **before** rewriting. Heuristics are deterministic (`meta_only` / `forward_only` / `rewrite_needed`). Optional `refineWithLlm` uses JSON in `complete().text` (`MockLlm` in tests). The call is pure: it does not write the store or chapters.
+
+`applyFoundationChange` orchestrates assess → confirm gate (`rewrite_needed` returns `needs_confirm` unless `confirmRewrite: true`) → `upsertFoundation` → optional sequential `chapter.write` when `rewriteChapters: true` (default **false**).
+
+```ts
+const assessment = await session.assessFoundationImpact({
+  characters: [{ name: "林深", role: "主角" }],
+});
+// assessment.severity / suggestedChapters / suggestedMode / reasons
+
+const outcome = await session.applyFoundationChange({
+  patch: { characters: [{ name: "林深", role: "主角" }] },
+  confirmRewrite: true,    // required when severity is rewrite_needed
+  rewriteChapters: false,  // host opt-in; chapters never auto-rewrite
+});
+if (outcome.status === "needs_confirm") {
+  // show outcome.assessment.reasons, then retry with confirmRewrite: true
+}
+```
 
 <a id="scenario-session-chapter"></a>
 
@@ -552,6 +576,7 @@ const worker = new Worker(new URL("./session.worker.ts", import.meta.url), { typ
 const session = createSessionClient(worker, { bookId: "letter" });
 await session.inspectFoundation({ prompt: "写一本三章短篇" });
 await session.startAutoWrite({ prompt: "……", generateMissing: true });
+await session.assessFoundationImpact({ book: { title: "无主的信", synopsis: "……" } });
 await session.chapter.write({ chapter: 1, mode: "create" });
 ```
 

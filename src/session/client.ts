@@ -10,11 +10,15 @@ import {
   type SessionNotice,
 } from "./protocol.js";
 import type {
+  ApplyFoundationChangeOptions,
+  ApplyFoundationChangeResult,
+  AssessFoundationImpactOptions,
   AutoWriteResult,
   ChapterRunner,
   ChapterView,
   ChapterWriteInput,
   ChapterWriteResult,
+  FoundationImpactAssessment,
   FoundationMeta,
   FoundationPatch,
   GenerateFoundationOptions,
@@ -179,6 +183,21 @@ export function createSessionClient(
     },
     generateFoundation(generateOpts: GenerateFoundationOptions): Promise<FoundationMeta> {
       return rpc({ ...envelope(), type: "generateFoundation", options: generateOpts });
+    },
+    assessFoundationImpact(
+      patch: FoundationPatch,
+      assessOpts: AssessFoundationImpactOptions = {},
+    ): Promise<FoundationImpactAssessment> {
+      const command = { ...envelope(), type: "assessFoundationImpact" as const, patch };
+      if (assessOpts.refineWithLlm !== undefined) {
+        return rpc({ ...command, options: { refineWithLlm: assessOpts.refineWithLlm } });
+      }
+      return rpc(command);
+    },
+    applyFoundationChange(
+      applyOpts: ApplyFoundationChangeOptions,
+    ): Promise<ApplyFoundationChangeResult> {
+      return rpc({ ...envelope(), type: "applyFoundationChange", options: applyOpts });
     },
     startAutoWrite(writeOpts: StartAutoWriteOptions): Promise<AutoWriteResult> {
       return rpc({ ...envelope(), type: "startAutoWrite", options: writeOpts });

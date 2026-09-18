@@ -53,7 +53,7 @@ export interface InspectResult {
 
 export interface CreateNovelSessionOptions {
   store: StorePort;
-  /** Required for S2 generate / auto-write and S3 `chapter.write`. Optional for inspect-only. */
+  /** Required for S2 generate / auto-write, S3 `chapter.write`, and S6 rewriteChapters. Optional for inspect / S5 heuristics. */
   llm?: LlmPort;
   bookId: string;
 }
@@ -86,6 +86,77 @@ export interface GenerateFoundationOptions {
   keys: readonly FoundationKey[];
   mode?: FoundationGenerateMode;
 }
+
+export const FOUNDATION_IMPACT_SEVERITIES = ["meta_only", "forward_only", "rewrite_needed"] as const;
+export type FoundationImpactSeverity = (typeof FOUNDATION_IMPACT_SEVERITIES)[number];
+
+export const FOUNDATION_IMPACT_MODES = ["none", "polish", "rewrite"] as const;
+export type FoundationImpactMode = (typeof FOUNDATION_IMPACT_MODES)[number];
+
+export interface ChapterRange {
+  start: number;
+  end: number;
+}
+
+export interface AssessFoundationImpactOptions {
+  /**
+   * When true and an `LlmPort` is present, refine the heuristics with a
+   * structured one-shot JSON completion. Default false (rules-first).
+   */
+  refineWithLlm?: boolean;
+}
+
+/** Pure assessment of a proposed foundation patch. Never mutates the store. */
+export interface FoundationImpactAssessment {
+  severity: FoundationImpactSeverity;
+  /** Written chapters that may need rewrite/polish (sorted, unique). */
+  suggestedChapters: number[];
+  /** Compact ranges derived from `suggestedChapters` (inclusive). */
+  suggestedRanges: ChapterRange[];
+  suggestedMode: FoundationImpactMode;
+  /** Host UI reasons (Chinese + short English). */
+  reasons: string[];
+  notes: string[];
+  /** Foundation keys whose content actually differs from the store. */
+  changedKeys: FoundationKey[];
+  source: "heuristics" | "llm";
+}
+
+export interface ApplyFoundationChangeOptions {
+  patch: FoundationPatch;
+  refineWithLlm?: boolean;
+  /**
+   * When true (default) and severity is `rewrite_needed`, return
+   * `{ status: "needs_confirm" }` without upsert or chapter writes.
+   */
+  requireConfirmRewrite?: boolean;
+  /** Host acknowledgement required to apply a `rewrite_needed` patch. */
+  confirmRewrite?: boolean;
+  /**
+   * Host opt-in: after upsert, sequentially `chapter.write` suggested chapters.
+   * Default false — chapters never auto-rewrite.
+   */
+  rewriteChapters?: boolean;
+  /** Override `assessment.suggestedChapters` (still filtered to written finals). */
+  chapters?: readonly number[];
+  /** Override `assessment.suggestedMode` when rewriting (`rewrite` | `polish`). */
+  mode?: Exclude<FoundationImpactMode, "none">;
+  instruction?: string;
+}
+
+export interface ApplyFoundationNeedsConfirm {
+  status: "needs_confirm";
+  assessment: FoundationImpactAssessment;
+}
+
+export interface ApplyFoundationApplied {
+  status: "applied";
+  assessment: FoundationImpactAssessment;
+  meta: FoundationMeta;
+  writes: ChapterWriteResult[];
+}
+
+export type ApplyFoundationChangeResult = ApplyFoundationNeedsConfirm | ApplyFoundationApplied;
 
 export interface StartAutoWriteOptions {
   prompt: string;
@@ -166,6 +237,20 @@ export interface NovelSession {
   importSnapshot(bytes: Uint8Array): Promise<void>;
   upsertFoundation(patch: FoundationPatch): Promise<FoundationMeta>;
   generateFoundation(options: GenerateFoundationOptions): Promise<FoundationMeta>;
+  /**
+   * Rules-first impact assessment of a proposed foundation patch.
+   * Optional LLM refinement when `refineWithLlm` and `llm` are set.
+   * Must not mutate the store or rewrite chapters.
+   */
+  assessFoundationImpact(
+    patch: FoundationPatch,
+    options?: AssessFoundationImpactOptions,
+  ): Promise<FoundationImpactAssessment>;
+  /**
+   * Assess → confirm gate for `rewrite_needed` → `upsertFoundation` →
+   * optional sequential `chapter.write` for suggested chapters.
+   */
+  applyFoundationChange(options: ApplyFoundationChangeOptions): Promise<ApplyFoundationChangeResult>;
   startAutoWrite(options: StartAutoWriteOptions): Promise<AutoWriteResult>;
   subscribe(listener: (event: SessionEvent) => void): SessionUnsubscribe;
   close(): void;

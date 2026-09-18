@@ -2,8 +2,8 @@
  * Scenario 7 — same-thread host session (`novel-engine/session`).
  * 场景 7：同线程宿主 Session（`novel-engine/session`）。
  *
- * S0–S3 same-thread. Worker bridge is scenario 8 (`session-host.ts`).
- * S0–S3 同线程。Worker 桥见场景 8（`session-host.ts`）。
+ * S0–S6 same-thread. Worker bridge is scenario 8 (`session-host.ts`).
+ * S0–S6 同线程。Worker 桥见场景 8（`session-host.ts`）。
  */
 
 import { MemoryStore, MockLlm } from "novel-engine";
@@ -83,6 +83,30 @@ export async function writeChapterWithMockTools() {
     bookId: "letter",
   });
   return session.chapter.write({ chapter: 1, mode: "create", title: "风暴之后" });
+}
+
+/** S5/S6: assess a proposed patch, then apply with a confirm gate. */
+export async function assessThenApplyFoundationChange() {
+  const store = new MemoryStore();
+  const session = await createNovelSession({ store, bookId: "letter" });
+  await session.upsertFoundation({
+    book: { title: "无主的信", synopsis: "灯塔与潮" },
+    premise: "林守捡到一封没有寄信人的信。",
+    outline: [{ chapter: 1, title: "风暴之后", summary: "捡到信" }],
+    characters: [{ name: "林守", role: "主角" }],
+    worldRules: [{ name: "信与潮", description: "涨潮来信" }],
+  });
+  await session.chapter.saveFinal(1, "林守在风暴后捡到信。");
+
+  const assessment = await session.assessFoundationImpact({
+    characters: [{ name: "林深", role: "主角" }],
+  });
+  const outcome = await session.applyFoundationChange({
+    patch: { characters: [{ name: "林深", role: "主角" }] },
+    confirmRewrite: assessment.severity === "rewrite_needed",
+    rewriteChapters: false,
+  });
+  return { assessment, outcome };
 }
 
 export async function twoBookWorkspace() {

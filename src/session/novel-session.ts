@@ -31,12 +31,23 @@ import {
   missingKeysFromGaps,
   patchFromGeneratedJson,
 } from "./generate.js";
-import { createChapterRunner } from "./chapter.js";
+import { createChapterRunner, runChapterWrite } from "./chapter.js";
+import {
+  assessProposedFoundation,
+  defaultRewriteInstruction,
+  listWrittenChapters,
+  uniqueSorted,
+} from "./impact.js";
 import { resolveSessionPlanning } from "./planning.js";
 import type {
+  ApplyFoundationChangeOptions,
+  ApplyFoundationChangeResult,
+  AssessFoundationImpactOptions,
   AutoWriteResult,
   ChapterRunner,
+  ChapterWriteResult,
   CreateNovelSessionOptions,
+  FoundationImpactAssessment,
   FoundationMeta,
   FoundationPatch,
   GenerateFoundationOptions,
@@ -145,6 +156,22 @@ export class NovelSessionImpl implements NovelSession {
     return meta;
   }
 
+  async assessFoundationImpact(
+    patch: FoundationPatch,
+    options: AssessFoundationImpactOptions = {},
+  ): Promise<FoundationImpactAssessment> {
+    this.assertOpen();
+    const current = await this.readFoundation();
+    return assessProposedFoundation(this.store, current, patch, this.llm, options);
+  }
+
+  async applyFoundationChange(
+    options: ApplyFoundationChangeOptions,
+  ): Promise<ApplyFoundationChangeResult> {
+    this.assertOpen();
+    return this.withBusy(() => this.runApplyFoundationChange(options));
+  }
+
   async generateFoundation(options: GenerateFoundationOptions): Promise<FoundationMeta> {
     this.assertOpen();
     const llm = this.requireLlm();
@@ -173,6 +200,56 @@ export class NovelSessionImpl implements NovelSession {
   async startAutoWrite(options: StartAutoWriteOptions): Promise<AutoWriteResult> {
     this.assertOpen();
     return this.withBusy(() => this.runAutoWrite(options));
+  }
+
+  private async runApplyFoundationChange(
+    options: ApplyFoundationChangeOptions,
+  ): Promise<ApplyFoundationChangeResult> {
+    const assessOpts: AssessFoundationImpactOptions = {};
+    if (options.refineWithLlm !== undefined) {
+      assessOpts.refineWithLlm = options.refineWithLlm;
+    }
+    const assessment = await this.assessFoundationImpact(options.patch, assessOpts);
+    const requireConfirm = options.requireConfirmRewrite !== false;
+    if (
+      assessment.severity === "rewrite_needed" &&
+      requireConfirm &&
+      options.confirmRewrite !== true
+    ) {
+      return { status: "needs_confirm", assessment };
+    }
+
+    const writes: ChapterWriteResult[] = [];
+    let writePlan: { mode: "rewrite" | "polish"; chapters: number[] } | null = null;
+    if (options.rewriteChapters === true) {
+      const mode = options.mode ?? assessment.suggestedMode;
+      if (mode === "rewrite" || mode === "polish") {
+        const written = new Set(await listWrittenChapters(this.store));
+        const requested = options.chapters ?? assessment.suggestedChapters;
+        const chapters = uniqueSorted(requested).filter((chapter) => written.has(chapter));
+        if (chapters.length > 0) {
+          this.requireLlm();
+          writePlan = { mode, chapters };
+        }
+      }
+    }
+
+    const meta = await this.upsertFoundation(options.patch);
+    if (writePlan) {
+      const llm = this.requireLlm();
+      const instruction = options.instruction ?? defaultRewriteInstruction(assessment);
+      for (const chapter of writePlan.chapters) {
+        writes.push(
+          await runChapterWrite(
+            this.store,
+            llm,
+            { chapter, mode: writePlan.mode, instruction },
+            (event) => this.emit(event),
+          ),
+        );
+      }
+    }
+    return { status: "applied", assessment, meta, writes };
   }
 
   private async runAutoWrite(options: StartAutoWriteOptions): Promise<AutoWriteResult> {

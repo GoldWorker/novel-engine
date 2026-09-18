@@ -9,7 +9,7 @@ import {
   SessionLlmRequiredError,
   WorkspaceClosedError,
 } from "./errors.js";
-import { CHAPTER_WRITE_MODES, type FoundationGap } from "./types.js";
+import { CHAPTER_WRITE_MODES, FOUNDATION_IMPACT_MODES, type FoundationGap } from "./types.js";
 import type { Progress } from "../domain/progress.js";
 import type {
   AutoWriteResult,
@@ -22,6 +22,10 @@ import type {
   InspectResult,
   SessionEvent,
   StartAutoWriteOptions,
+  ApplyFoundationChangeOptions,
+  ApplyFoundationChangeResult,
+  AssessFoundationImpactOptions,
+  FoundationImpactAssessment,
 } from "./types.js";
 
 /** Protocol version on every session host ↔ worker message. Distinct `ns` from Engine. */
@@ -40,6 +44,8 @@ export type SessionCommandType =
   | "importSnapshot"
   | "upsertFoundation"
   | "generateFoundation"
+  | "assessFoundationImpact"
+  | "applyFoundationChange"
   | "startAutoWrite"
   | "chapterGet"
   | "chapterSaveFinal"
@@ -81,6 +87,15 @@ export type SessionGenerateCommand = SessionEnvelope & {
   type: "generateFoundation";
   options: GenerateFoundationOptions;
 };
+export type SessionAssessImpactCommand = SessionEnvelope & {
+  type: "assessFoundationImpact";
+  patch: FoundationPatch;
+  options?: AssessFoundationImpactOptions;
+};
+export type SessionApplyFoundationCommand = SessionEnvelope & {
+  type: "applyFoundationChange";
+  options: ApplyFoundationChangeOptions;
+};
 export type SessionAutoWriteCommand = SessionEnvelope & {
   type: "startAutoWrite";
   options: StartAutoWriteOptions;
@@ -110,6 +125,8 @@ export type SessionCommand =
   | SessionImportSnapshotCommand
   | SessionUpsertCommand
   | SessionGenerateCommand
+  | SessionAssessImpactCommand
+  | SessionApplyFoundationCommand
   | SessionAutoWriteCommand
   | SessionChapterGetCommand
   | SessionChapterSaveFinalCommand
@@ -155,6 +172,8 @@ export type SessionRpcResult = {
   importSnapshot: null;
   upsertFoundation: FoundationMeta;
   generateFoundation: FoundationMeta;
+  assessFoundationImpact: FoundationImpactAssessment;
+  applyFoundationChange: ApplyFoundationChangeResult;
   startAutoWrite: AutoWriteResult;
   chapterGet: ChapterView | null;
   chapterSaveFinal: null;
@@ -183,6 +202,13 @@ export function isSessionCommand(value: unknown): value is SessionCommand {
       return isRecord(value.patch);
     case "generateFoundation":
       return isGenerateOptions(value.options);
+    case "assessFoundationImpact":
+      return (
+        isRecord(value.patch) &&
+        (value.options === undefined || isAssessImpactOptions(value.options))
+      );
+    case "applyFoundationChange":
+      return isApplyFoundationOptions(value.options);
     case "startAutoWrite":
       return isAutoWriteOptions(value.options);
     case "chapterGet":
@@ -292,6 +318,48 @@ function isGenerateOptions(value: unknown): value is GenerateFoundationOptions {
     return false;
   }
   return value.mode === undefined || value.mode === "fill_missing" || value.mode === "overwrite";
+}
+
+function isAssessImpactOptions(value: unknown): value is AssessFoundationImpactOptions {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return value.refineWithLlm === undefined || typeof value.refineWithLlm === "boolean";
+}
+
+function isApplyFoundationOptions(value: unknown): value is ApplyFoundationChangeOptions {
+  if (!isRecord(value) || !isRecord(value.patch)) {
+    return false;
+  }
+  if (value.refineWithLlm !== undefined && typeof value.refineWithLlm !== "boolean") {
+    return false;
+  }
+  if (value.requireConfirmRewrite !== undefined && typeof value.requireConfirmRewrite !== "boolean") {
+    return false;
+  }
+  if (value.confirmRewrite !== undefined && typeof value.confirmRewrite !== "boolean") {
+    return false;
+  }
+  if (value.rewriteChapters !== undefined && typeof value.rewriteChapters !== "boolean") {
+    return false;
+  }
+  if (value.chapters !== undefined) {
+    if (!Array.isArray(value.chapters) || !value.chapters.every((n) => typeof n === "number")) {
+      return false;
+    }
+  }
+  if (value.mode !== undefined) {
+    if (value.mode !== "rewrite" && value.mode !== "polish") {
+      return false;
+    }
+    if (!(FOUNDATION_IMPACT_MODES as readonly string[]).includes(value.mode)) {
+      return false;
+    }
+  }
+  if (value.instruction !== undefined && typeof value.instruction !== "string") {
+    return false;
+  }
+  return true;
 }
 
 function isAutoWriteOptions(value: unknown): value is StartAutoWriteOptions {

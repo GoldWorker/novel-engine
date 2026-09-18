@@ -136,6 +136,15 @@ export function attachSessionWorker(
         case "generateFoundation":
           postResult(data.id, await current.generateFoundation(data.options));
           return;
+        case "assessFoundationImpact":
+          postResult(
+            data.id,
+            await current.assessFoundationImpact(data.patch, data.options ?? {}),
+          );
+          return;
+        case "applyFoundationChange":
+          postResult(data.id, await current.applyFoundationChange(data.options));
+          return;
         case "startAutoWrite":
           postResult(data.id, await current.startAutoWrite(data.options));
           return;

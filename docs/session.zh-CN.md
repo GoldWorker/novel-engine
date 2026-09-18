@@ -1,4 +1,4 @@
-# 宿主 Session API（`novel-engine/session`）— S0–S4
+# 宿主 Session API（`novel-engine/session`）— S0–S6
 
 [English](session.md) | [中文文档](session.zh-CN.md)
 
@@ -8,7 +8,7 @@
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 ```
 
-包版本 **0.3.0**。本文覆盖 **S0–S4**。
+包版本 **0.4.0**。本文覆盖 **S0–S6**。
 
 ## 状态
 
@@ -19,8 +19,10 @@ import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 | **S2** | `generateFoundation` / upsert / 自动写作（结构化 LLM） | 已完成 |
 | **S3** | ChapterRunner / `chapter.get` / `saveFinal` / `write` | 已完成 |
 | **S4** | Worker session 桥（`createSessionClient` / `attachSessionWorker`） | 已完成 |
+| **S5** | `assessFoundationImpact`（规则优先，可选 LLM 精炼） | 已完成 |
+| **S6** | `applyFoundationChange`（评估 → 确认 → upsert → 可选写章） | 已完成 |
 
-S1–S3 使用**同线程** `NovelSession`（业务真相源）。**S4** 是通过 `postMessage` 适配同一对象，不是第二套业务实现。
+S1–S3 使用**同线程** `NovelSession`（业务真相源）。**S4** 是通过 `postMessage` 适配同一对象，不是第二套业务实现。**S5/S6** 也挂在同一对象上（含 Worker 桥）。
 
 ## S0 — `foundationMissing`
 
@@ -53,7 +55,7 @@ await session.inspectFoundation({ prompt: "写一本分层中篇：……" });
 await session.assertReadyToWrite();
 ```
 
-S1 里 `llm` 对只读检查可选。**S2** 的 `generateFoundation` / `startAutoWrite` 以及 **S3** 的 `chapter.write` 必须提供（缺失则 `SessionLlmRequiredError`）。每次读取都是 **store 直读**（Session 不缓存产物）。
+S1 里 `llm` 对只读检查 / S5 启发式可选。**S2** 的 `generateFoundation` / `startAutoWrite`、**S3** 的 `chapter.write`、以及 **S6** 的 `rewriteChapters` 必须提供（缺失则 `SessionLlmRequiredError`）。每次读取都是 **store 直读**（Session 不缓存产物）。
 
 | 方法 | 说明 |
 | --- | --- |
@@ -66,7 +68,9 @@ S1 里 `llm` 对只读检查可选。**S2** 的 `generateFoundation` / `startAut
 | `exportSnapshot()` / `importSnapshot(bytes)` | 现有书稿快照 API 的薄封装。 |
 | `upsertFoundation(patch)` | 部分写入 `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules`。指纹文件变化时作废 `meta/foundation_audit.json`。 |
 | `generateFoundation({ prompt, keys, mode? })` | 结构化一次性 `LlmPort.complete`；从 `text` 解析 JSON；再 `upsertFoundation`。**不是** Engine 循环。 |
-| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | 可选 upsert/generate，然后要么 `{ status: "needs_foundation" }`，要么 `createEngine(...).run`。与 `chapter.write` 互斥（`SessionBusyError`）。 |
+| `assessFoundationImpact(patch, { refineWithLlm? })` | S5：对**拟议**补丁做规则优先影响评估。可选 LLM JSON 精炼。**不写盘**。 |
+| `applyFoundationChange({ patch, confirmRewrite?, rewriteChapters?, … })` | S6：评估 → 确认闸门 → upsert → 可选顺序 `chapter.write`。 |
+| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | 可选 upsert/generate，然后要么 `{ status: "needs_foundation" }`，要么 `createEngine(...).run`。与 `chapter.write` / `applyFoundationChange` 互斥（`SessionBusyError`）。 |
 | `chapter` | S3 ChapterRunner：`get` / `saveFinal` / `write`。同线程；不是 Engine 全书 Route。 |
 | `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`。返回取消订阅函数。 |
 | `close()` | 之后的调用抛 `SessionClosedError`。 |
@@ -134,7 +138,7 @@ const outcome = await session.startAutoWrite({
 
 `subscribe` 在 upsert 后发出 `foundation_updated`，每个 Engine `step` 发出 `auto_write_step`，`chapter.write` 过程中发出 `chapter_step`，needs-foundation 与 Engine 结束都发出 `stopped`。
 
-`startAutoWrite` 与 `chapter.write` 共用 busy 标志：其中一个进行中再调用另一个（或自己）会抛 `SessionBusyError`。
+`startAutoWrite`、`chapter.write` 与 `applyFoundationChange` 共用 busy 标志：其中一个进行中再调用另一个（或自己）会抛 `SessionBusyError`。
 
 ## S1 — `NovelWorkspace`
 
@@ -244,22 +248,77 @@ await session.chapter.write({ chapter: 1, mode: "create" });
 | --- | --- |
 | `attachSessionWorker(port, { createSession })` | Worker 适配器。`createSession` 注入 `StorePort` + `LlmPort`，返回 `createNovelSession(...)`。 |
 | `createSessionClient(port, { bookId })` | 主线程 `NovelSession`。`bookId` 必须与 Worker 侧 session 一致。 |
-| 协议 | `SESSION_PROTOCOL === 1`，`ns: "session"`（不与 Engine 的 `v: 1` 命令冲突）。命令 → `result` / `event` / `error`。 |
-| Busy | Worker 侧 `SessionBusyError`：`startAutoWrite` 进行中会挡住跨桥的 `chapter.write`。 |
+| 协议 | `SESSION_PROTOCOL === 1`，`ns: "session"`（不与 Engine 的 `v: 1` 命令冲突）。S5/S6 增量命令：`assessFoundationImpact` / `applyFoundationChange`。命令 → `result` / `event` / `error`。 |
+| Busy | Worker 侧 `SessionBusyError`：`startAutoWrite` / `applyFoundationChange` 进行中会挡住跨桥的 `chapter.write`。 |
 | `generateFoundation` | **在 Worker 里跑**（不在 UI 线程），因为书的 `StorePort` 在那边（通常是 OPFS）。主线程 generate 会写到另一份 store。 |
 | `LlmPort` | `fetch` 宿主 BFF。**不要把供应商 API Key 打进公开 Worker 包**。本包不含 Next.js 代码。 |
 | 事件 | Worker 转发 `subscribe` 事件（`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`）。 |
 
 示意：[`examples/session.worker.ts`](../examples/session.worker.ts) + [`examples/session-host.ts`](../examples/session-host.ts)。
 
+## S5 — `assessFoundationImpact`
+
+在改完基础设定、重写章节之前，先问 session 影响范围有多大。**规则优先**的启发式是确定性的（MemoryStore 测试、不需要 LLM）。当 `refineWithLlm: true` 且提供了 `LlmPort` 时，可用一次性 JSON 精炼结果——**不能把启发式 `severity` 降级**。从不要求真实供应商（测试用 `MockLlm`）。
+
+```ts
+const assessment = await session.assessFoundationImpact({
+  book: { title: "无主的信（修订）", synopsis: "……" },
+  characters: [{ name: "林深", role: "主角" }],
+});
+// assessment.severity: "meta_only" | "forward_only" | "rewrite_needed"
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `severity` | `meta_only` — 标题/标签/简介类 `meta/book.json`。`forward_only` — 主要影响未写的后续章节。`rewrite_needed` — 角色 / 世界 / 已写情节与终稿矛盾。 |
+| `suggestedChapters` | 可能需要 rewrite/polish 的已写章节（有 `chapters/NN.md`，排序去重）。 |
+| `suggestedRanges` | 由 `suggestedChapters` 压缩的闭区间（如 `{ start: 1, end: 3 }`）。 |
+| `suggestedMode` | `none` \| `polish` \| `rewrite`。 |
+| `reasons` / `notes` | 给宿主 UI 的中英短句。 |
+| `changedKeys` | 实际内容发生变化的基础设定键。 |
+| `source` | `"heuristics"` 或 `"llm"`。 |
+
+启发式查看 `meta/*`、`premise.md`、`outline.json`、`layered_outline.json`、`characters.json`、`world_rules.json`，以及已写的 `chapters/`（`drafts/` 只会写进 notes）。中篇随时允许 upsert/generate 基础设定；本 API **只评估**。**不得**改 store，也不得重写章节。
+
+## S6 — `applyFoundationChange`
+
+编排：评估 → `rewrite_needed` 确认闸门 → `upsertFoundation` → 对 `suggestedChapters` 可选顺序 `chapter.write`。复用 S2/S3 API。章节**不会自动重写**——宿主必须传 `rewriteChapters: true`。
+
+```ts
+const outcome = await session.applyFoundationChange({
+  patch: { premise: "……", characters: [{ name: "林深" }] },
+  confirmRewrite: true,     // severity 为 rewrite_needed 时需要（默认闸门）
+  rewriteChapters: true,    // 宿主显式选择；默认 false
+  instruction: "按新设定对齐本章",
+});
+
+if (outcome.status === "needs_confirm") {
+  // 用 outcome.assessment.reasons 提示 UI，再带 confirmRewrite: true 重试
+  return;
+}
+// outcome.status === "applied"
+// outcome.assessment / outcome.meta / outcome.writes
+```
+
+| 选项 | 说明 |
+| --- | --- |
+| `patch` | 与 `upsertFoundation` 相同的 `FoundationPatch`。 |
+| `requireConfirmRewrite` | 默认 **true**。severity 为 `rewrite_needed` 且未 `confirmRewrite` → `{ status: "needs_confirm" }`，**不写盘**。 |
+| `confirmRewrite` | 宿主确认接受需要改写的补丁。 |
+| `rewriteChapters` | 默认 **false**。为 true 时对建议（或 `chapters` 覆盖）终稿顺序 `chapter.write`（`rewrite` 或 `polish`）。 |
+| `mode` | 可选覆盖 `suggestedMode`（`rewrite` \| `polish`）。 |
+| `refineWithLlm` | 转给 S5。 |
+
+`meta_only` / `forward_only` 无需确认即可 apply。指纹文件仍会经 `upsertFoundation` 作废 `foundation_audit`。与 `startAutoWrite` / `chapter.write` 共用 busy 标志。
+
 ## 错误
 
 | 错误 | 何时 |
 | --- | --- |
 | `FoundationIncompleteError` | `assertReadyToWrite` — `.gaps` 即检查表。 |
-| `SessionLlmRequiredError` | `generateFoundation` / Engine 版 `startAutoWrite` / `chapter.write` 未提供 `llm`。 |
+| `SessionLlmRequiredError` | `generateFoundation` / Engine 版 `startAutoWrite` / `chapter.write` / `applyFoundationChange({ rewriteChapters: true })` 未提供 `llm`。 |
 | `FoundationGenerateError` | 非法 `keys`，或 `complete().text` 不是 JSON 对象。 |
-| `SessionBusyError` | `startAutoWrite` 或 `chapter.write` 进行中再调用另一个（或自己）（同线程与 Worker 桥均如此）。 |
+| `SessionBusyError` | `startAutoWrite`、`chapter.write` 或 `applyFoundationChange` 进行中再调用另一个（同线程与 Worker 桥均如此）。 |
 | `ChapterConflictError` | 模式前置失败（create 时已有终稿、continue 没有草稿、rewrite/polish 没有终稿）。 |
 | `ChapterRunnerError` | 非法章节号、空的 `saveFinal`、或作者循环没有产出终稿。 |
 | `SessionClosedError` | 对已关闭 session 调用（包括 `switchTo` 之后）。 |

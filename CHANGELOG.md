@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.0 — 2026-09-18
+
+### Added
+
+- **Session S5 `assessFoundationImpact`** — rules-first, deterministic heuristics (optional MockLlm JSON refinement) that classify a proposed foundation patch as `meta_only` | `forward_only` | `rewrite_needed`. Returns `suggestedChapters` / `suggestedRanges`, `suggestedMode` (`none` | `polish` | `rewrite`), bilingual `reasons` / `notes`. Pure assessment: **does not mutate the store or rewrite chapters**. LLM refinement cannot downgrade heuristic severity.
+- **Session S6 `applyFoundationChange`** — assess → confirm gate for `rewrite_needed` (`needs_confirm` unless `confirmRewrite: true`) → `upsertFoundation` → optional sequential `chapter.write` for suggested chapters (`rewriteChapters`, default false). Chapters never auto-rewrite; host must opt in. Reuses existing Session APIs. Busy-flag shared with `startAutoWrite` / `chapter.write`.
+- Worker protocol stays **`SESSION_PROTOCOL === 1`** with additive commands `assessFoundationImpact` / `applyFoundationChange`.
+
+### Documentation
+
+- `docs/session.md` / `docs/session.zh-CN.md` cover S5–S6. Root README scenarios and `docs/api.md` list the new methods. Package version **0.4.0**.
+
+## 0.3.0 — 2026-09-17
+
 ### Added
 
 - **Optional `novel-engine/session` (0.3.0)** — same-thread host façade: `createNovelSession` / `createNovelWorkspace`. S0/S1: `getFoundation` / `inspectFoundation` / `assertReadyToWrite` / workspace. **S2:** `upsertFoundation`, structured one-shot `generateFoundation` (JSON in `LlmPort.complete().text` → upsert; not an Engine loop), and `startAutoWrite` (optional generate, then `needs_foundation` or `createEngine().run`). **S3:** Session ChapterRunner `session.chapter.get` / `saveFinal` / `write` (`create` / `continue` / `rewrite` / `polish`) — dedicated writer loop reusing `src/workers/tools.ts`; not `Engine.run` and not `pendingRewrites`. Mutual exclusion via `SessionBusyError`. **S4:** Worker bridge `createSessionClient` / `attachSessionWorker` — adapter over the same `NovelSession` (`ns: "session"` protocol); `generateFoundation` stays in the worker with the store; `LlmPort` should `fetch` a host BFF (no vendor keys in the worker). `subscribe` for `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`. Default `.` / `./worker` / `./llm` bundles do not import session. Docs: `docs/session.md` / `docs/session.zh-CN.md`.

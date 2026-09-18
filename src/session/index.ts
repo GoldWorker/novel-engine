@@ -2,16 +2,23 @@
  * Optional same-thread host session (`novel-engine/session`).
  *
  * Not part of the default `novel-engine` / `novel-engine/worker` /
- * `novel-engine/llm` bundles. S0–S4: inspect, upsert/generate foundation,
- * same-thread auto-write, Session ChapterRunner, and a Worker bridge
+ * `novel-engine/llm` bundles. S0–S6: inspect, upsert/generate foundation,
+ * same-thread auto-write, Session ChapterRunner, a Worker bridge
  * (`createSessionClient` / `attachSessionWorker`) that adapts the same
- * `NovelSession` over messages. Default worker entry still does not import session.
+ * `NovelSession` over messages, foundation-impact assessment, and batched
+ * `applyFoundationChange`. Default worker entry still does not import session.
  */
 export type {
+  ApplyFoundationApplied,
+  ApplyFoundationChangeOptions,
+  ApplyFoundationChangeResult,
+  ApplyFoundationNeedsConfirm,
+  AssessFoundationImpactOptions,
   AutoWriteEngineOutcome,
   AutoWriteNeedsFoundation,
   AutoWriteResult,
   BookIndexEntry,
+  ChapterRange,
   ChapterRunner,
   ChapterView,
   ChapterWriteInput,
@@ -22,6 +29,9 @@ export type {
   CreateNovelWorkspaceOptions,
   FoundationGap,
   FoundationGenerateMode,
+  FoundationImpactAssessment,
+  FoundationImpactMode,
+  FoundationImpactSeverity,
   FoundationKey,
   FoundationMeta,
   FoundationPatch,
@@ -36,7 +46,13 @@ export type {
   StartAutoWriteOptions,
   WorkspaceIndex,
 } from "./types.js";
-export { CHAPTER_WRITE_MODES, FOUNDATION_KEYS, WORKSPACE_INDEX_PATH } from "./types.js";
+export {
+  CHAPTER_WRITE_MODES,
+  FOUNDATION_IMPACT_MODES,
+  FOUNDATION_IMPACT_SEVERITIES,
+  FOUNDATION_KEYS,
+  WORKSPACE_INDEX_PATH,
+} from "./types.js";
 
 export {
   BookNotFoundError,
