@@ -155,7 +155,13 @@ function createOpenAiCompatibleLlm(
       if (request.tools && request.tools.length > 0) {
         body.tools = mapTools(request.tools);
       }
-      const payload = await postJson({ fetch: fetchImpl, url, headers, body });
+      const payload = await postJson({
+        fetch: fetchImpl,
+        url,
+        headers,
+        body,
+        ...(request.signal !== undefined ? { signal: request.signal } : {}),
+      });
       return parseOpenAiResult(payload);
     },
   };

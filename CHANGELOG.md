@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.7.0 — 2026-09-18
+
+### Compatible
+
+- **Required Kit / Session / Engine signatures are unchanged.** Existing call paths behave as in 0.6.0: `startBook` / `startAutoWrite` without `signal`, assess→apply confirm gates, `confirmAuditGap`, busy rules, `pause` / `resume` / `steer` idle semantics, `deleteChapter` (no renumber) on MemoryStore / OpfsStore, Worker protocol `SESSION_PROTOCOL === 1` with **additive** commands only.
+- Default success / `needs_foundation` shapes are unchanged when the host does not pass `signal` and does not call `cancel()` / `cancelBook()`.
+- `generateFoundation` is still **not** busy-locked. `pause` / `resume` / `steer` still do **not** take the busy flag.
+- Vendor adapters still throw `LlmAdapterError` (`status?`, `body?`); it is now a subclass of portable `LlmError`.
+
+### Added
+
+- **Cancellable long tasks** — optional `AbortSignal` on `startAutoWrite` / `startBook`, `generateFoundation`, and `chapter.write` / `writeChapter`. `session.cancel()` / `kit.cancelBook()` abort the in-flight run (RPC `cancel` on the Session worker bridge). Idle cancel is `{ status: "idle" }` (no-op). In-flight work rejects with dedicated **`AbortedError`**, then clears busy and `runningEngine`. Engine: optional `run({ signal })` and `engine.cancel()`.
+- **Run-state read API** — `session.getRunState()` / `kit.getRunState()` → `"idle" | "generating_missing" | "running" | "paused" | "busy"`. Pure observation (not busy-locked). `running` / `paused` ↔ pause/steer would be `ok`; otherwise they are `idle`.
+- **LLM + Store error alignment** — portable `LlmError` (`status?`, `body?`) from `LlmPort.complete` failures and kit worker `llmEndpoint` fetch (was a generic `Error`). `StoreError` / `StoreRemoveUnsupportedError`: `chapter.delete` throws **before** mutating progress when `StorePort.remove` is missing (MemoryStore / OpfsStore success path unchanged). Serializable across the Worker bridge like existing session errors.
+
+### Documentation
+
+- README + guide + api + architecture (EN/ZH) mark Compatible vs Added. Package version **0.7.0**.
+
 ## 0.6.0 — 2026-09-18
 
 ### Added

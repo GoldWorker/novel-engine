@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createOpenAiLlm,
   LlmAdapterError,
+  LlmError,
   OPENAI_DEFAULT_BASE_URL,
   type LlmCompletionRequest,
 } from "../../src/adapters/llm/index.js";
@@ -167,6 +168,7 @@ describe("createOpenAiLlm", () => {
       status: 401,
     });
     await expect(llm.complete(firstTurn)).rejects.toThrow(/401/);
+    await expect(llm.complete(firstTurn)).rejects.toBeInstanceOf(LlmError);
   });
 
   it("throws when tool call arguments are not a JSON object", async () => {

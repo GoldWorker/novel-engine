@@ -308,6 +308,36 @@ describe("session worker protocol", () => {
     attached.detach();
   });
 
+  it("cancel / getRunState over the bridge abort generateMissing", async () => {
+    const { host, worker } = createLinkedMessagePorts();
+    let release!: (value: LlmCompletionResult) => void;
+    const gate = new Promise<LlmCompletionResult>((resolve) => {
+      release = resolve;
+    });
+    const llm = new MockLlm([() => gate]);
+    const attached = attachSessionWorker(worker, {
+      createSession: () =>
+        createNovelSession({ store: new MemoryStore(), llm, bookId: "abort" }),
+    });
+    const session = createSessionClient(host, { bookId: "abort" });
+    expect(await session.getRunState()).toBe("idle");
+    expect(await session.cancel()).toEqual({ status: "idle" });
+
+    const pending = session.startAutoWrite({
+      prompt: short.prompt,
+      generateMissing: true,
+    });
+    await waitFor(() => llm.callCount > 0);
+    expect(await session.getRunState()).toBe("generating_missing");
+    expect(await session.cancel()).toEqual({ status: "ok" });
+    await expect(pending).rejects.toMatchObject({ name: "AbortedError" });
+    expect(await session.getRunState()).toBe("idle");
+    release({ text: "{}" });
+
+    session.close();
+    attached.detach();
+  });
+
   it("chapterDelete over the bridge removes artifacts", async () => {
     const { host, worker } = createLinkedMessagePorts();
     const store = new MemoryStore();
@@ -349,6 +379,22 @@ describe("session worker protocol", () => {
         id: "s-d",
         chapter: 1,
         options: { syncOutline: true },
+      }),
+    ).toBe(true);
+    expect(
+      isSessionCommand({
+        v: SESSION_PROTOCOL,
+        ns: SESSION_NS,
+        type: "cancel",
+        id: "s-c",
+      }),
+    ).toBe(true);
+    expect(
+      isSessionCommand({
+        v: SESSION_PROTOCOL,
+        ns: SESSION_NS,
+        type: "getRunState",
+        id: "s-rs",
       }),
     ).toBe(true);
   });

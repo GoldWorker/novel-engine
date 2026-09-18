@@ -28,6 +28,11 @@ export interface LlmCompletionRequest {
   agent?: AgentId;
   /** Tools the worker may invoke this turn. */
   tools?: readonly LlmToolSpec[];
+  /**
+   * Optional abort. Adapters that `fetch` should forward it; unknown
+   * implementations may ignore it — Engine/Session still race the wait.
+   */
+  signal?: AbortSignal;
 }
 
 export interface LlmCompletionResult {
@@ -45,4 +50,24 @@ export interface LlmCompletionResult {
  */
 export interface LlmPort {
   complete(request: LlmCompletionRequest): Promise<LlmCompletionResult>;
+}
+
+/**
+ * Failure from `LlmPort.complete` (vendor adapters and kit `llmEndpoint` fetch).
+ * Serializable across the Session Worker bridge.
+ */
+export class LlmError extends Error {
+  readonly status?: number;
+  readonly body?: string;
+
+  constructor(message: string, options?: { status?: number; body?: string }) {
+    super(message);
+    this.name = "LlmError";
+    if (options?.status !== undefined) {
+      this.status = options.status;
+    }
+    if (options?.body !== undefined) {
+      this.body = options.body;
+    }
+  }
 }

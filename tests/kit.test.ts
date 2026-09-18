@@ -139,6 +139,8 @@ describe("NovelKit.create (runtime: main, store: memory)", () => {
     expect(result.auditOnly).toBe(false);
     expect(llm.callCount).toBe(0);
     expect(await kit.pauseBook()).toEqual({ status: "idle" });
+    expect(await kit.getRunState()).toBe("idle");
+    expect(await kit.cancelBook()).toEqual({ status: "idle" });
     kit.dispose();
   });
 

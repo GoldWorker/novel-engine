@@ -207,7 +207,7 @@ if (outcome.status === "needs_foundation" && outcome.auditOnly) {
 }
 ```
 
-Layered Engine mock (volume/arc, arc-end review → `expand_next_arc`): [`examples/layered-book.ts`](examples/layered-book.ts) · [guide §2](docs/guide.md#scenario-layered-book) · `npm run test:layered`. Long runs: `pauseBook` / `resumeBook` / `steerBook(message)` forward to the Engine held during `startBook` (main and worker). Calling them when nothing is running returns `{ status: "idle" }` (no-op, not an exception).
+Layered Engine mock (volume/arc, arc-end review → `expand_next_arc`): [`examples/layered-book.ts`](examples/layered-book.ts) · [guide §2](docs/guide.md#scenario-layered-book) · `npm run test:layered`. Long runs: `pauseBook` / `resumeBook` / `steerBook(message)` forward to the Engine held during `startBook` (main and worker). Calling them when nothing is running returns `{ status: "idle" }` (no-op, not an exception). **Added (0.7.0):** `cancelBook()` / optional `signal` abort with `AbortedError`; `getRunState()` is a read-only snapshot.
 
 <a id="change-meta"></a>
 
@@ -422,7 +422,7 @@ Also exported from `./kit`: `defaultKitWorkerUrl()`, `attachKitWorker(port)`, `K
 
 Names wrap Session 1:1 (no second copy of the rules). After `dispose()`, every method throws `KitClosedError`.
 
-Busy flag (Session `SessionBusyError`): **`startBook`**, **`writeChapter`**, **`applyFoundation`**, **`deleteChapter`** are mutually exclusive. `pauseBook` / `resumeBook` / `steerBook` do **not** take the busy flag (they only apply while `startBook`'s Engine is running). `inspect` / `fillFoundation` / `generateFoundation` / `assessFoundation` / `getChapter` / `saveChapter` / `updateOutline` / reads / export are **not** on that flag.
+Busy flag (Session `SessionBusyError`): **`startBook`**, **`writeChapter`**, **`applyFoundation`**, **`deleteChapter`** are mutually exclusive. `pauseBook` / `resumeBook` / `steerBook` / **`cancelBook` / `getRunState`** do **not** take the busy flag (`pause`/`steer` only apply while `startBook`'s Engine is running). `inspect` / `fillFoundation` / `generateFoundation` / `assessFoundation` / `getChapter` / `saveChapter` / `updateOutline` / reads / export are **not** on that flag.
 
 #### Inspect / ready
 
@@ -438,9 +438,11 @@ Busy flag (Session `SessionBusyError`): **`startBook`**, **`writeChapter`**, **`
 | Method | Args | Returns | Notes |
 | --- | --- | --- | --- |
 | `fillFoundation(patch)` | `FoundationPatch` | `FoundationMeta` | Upsert. Omitted keys unchanged. Arrays **replace the whole file**. Invalidates `foundation_audit` when fingerprint files change. **No** assess / confirm |
-| `generateFoundation({ prompt, keys, mode? })` | keys: `book` \| `premise` \| `outline` \| `layered_outline` \| `characters` \| `world_rules` | `FoundationMeta` | One-shot LLM **JSON in `text`** (not toolCalls). `mode`: `"fill_missing"` (default) or `"overwrite"`. Requires `llm` / worker endpoint. **Not** an Engine loop, **not** busy-locked |
-| `startBook({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps? })` | — | `AutoWriteResult` | Optional upsert/generate, then `{ status: "needs_foundation", gaps, meta, auditOnly }` **or** `Engine.run` → `{ status: "completed" \| "stopped", result, meta }`. Default `requireConfirmGaps: true`. `confirmAuditGap: true` proceeds only when leftover gaps are audit-only. Busy |
+| `generateFoundation({ prompt, keys, mode?, signal? })` | keys: `book` \| `premise` \| `outline` \| `layered_outline` \| `characters` \| `world_rules` | `FoundationMeta` | One-shot LLM **JSON in `text`** (not toolCalls). `mode`: `"fill_missing"` (default) or `"overwrite"`. Requires `llm` / worker endpoint. **Not** an Engine loop, **not** busy-locked. **Added:** optional `signal` |
+| `startBook({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps?, signal? })` | — | `AutoWriteResult` | Optional upsert/generate, then `{ status: "needs_foundation", gaps, meta, auditOnly }` **or** `Engine.run` → `{ status: "completed" \| "stopped", result, meta }`. Default `requireConfirmGaps: true`. `confirmAuditGap: true` proceeds only when leftover gaps are audit-only. Busy. **Added:** optional `signal`. **Compatible:** omit `signal` = 0.6.0 |
 | `pauseBook()` / `resumeBook()` / `steerBook(message)` | — | `{ status: "ok" \| "idle" }` | Forwards to the Engine held during `startBook`. `idle` when nothing is running (no-op). Empty steer note throws `EngineError`. Not busy-locked |
+| `cancelBook()` | — | `{ status: "ok" \| "idle" }` | **Added (0.7.0).** Abort in-flight start/generate/write. In-flight promise rejects `AbortedError`. Idle is a no-op. Not busy-locked |
+| `getRunState()` | — | `"idle" \| "generating_missing" \| "running" \| "paused" \| "busy"` | **Added (0.7.0).** Pure observation. `running`/`paused` ↔ pause/steer would be `ok` |
 
 `generateFoundation` keys are **snake_case** (`layered_outline`, `world_rules`); patch fields are **camelCase** (`layeredOutline`, `worldRules`). `BookMetadata` is `{ title, synopsis }` only.
 
@@ -486,7 +488,7 @@ Worker reconnect on `createBook` / `switchBook` tears down the previous kit work
 
 From `novel-engine/kit`: `KitClosedError`, `KitLlmRequiredError`, `KitWorkerError`, `KitWorkspaceDisabledError`.
 
-From Session (methods rethrow): `FoundationIncompleteError`, `SessionLlmRequiredError`, `FoundationGenerateError`, `SessionBusyError`, `ChapterConflictError`, `ChapterRunnerError`, `SessionClosedError`, `BookNotFoundError`.
+From Session (methods rethrow): `FoundationIncompleteError`, `SessionLlmRequiredError`, `FoundationGenerateError`, `SessionBusyError`, `ChapterConflictError`, `ChapterRunnerError`, `SessionClosedError`, `BookNotFoundError`, **`AbortedError`**, **`LlmError`**, **`StoreRemoveUnsupportedError`**.
 
 <a id="lower-level"></a>
 
@@ -506,7 +508,7 @@ Use these when Kit defaults are wrong (custom `createStore`, scripted Engine loo
 | OPFS without Kit | `createOpfsStore` / `OpfsStore.open` | `novel-engine` |
 | Vendor fetch LLM | `createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm` / `createVendorLlm` | `novel-engine/llm` |
 
-Kit → Session names: `inspect` → `inspectFoundation`, `assertReady` → `assertReadyToWrite`, `fillFoundation` → `upsertFoundation`, `startBook` → `startAutoWrite`, `pauseBook`/`resumeBook`/`steerBook` → `pause`/`resume`/`steer`, `assessFoundation` → `assessFoundationImpact`, `applyFoundation` → `applyFoundationChange`, `getChapter`/`writeChapter`/`saveChapter`/`deleteChapter` → `chapter.get`/`write`/`saveFinal`/`delete`, `updateOutline` → `upsertFoundation` (outline keys), `getMeta` → `getFoundation`, `exportBook`/`importBook` → `exportSnapshot`/`importSnapshot`, `dispose` → `close` (+ terminate worker).
+Kit → Session names: `inspect` → `inspectFoundation`, `assertReady` → `assertReadyToWrite`, `fillFoundation` → `upsertFoundation`, `startBook` → `startAutoWrite`, `pauseBook`/`resumeBook`/`steerBook` → `pause`/`resume`/`steer`, `cancelBook` → `cancel`, `getRunState` → `getRunState`, `assessFoundation` → `assessFoundationImpact`, `applyFoundation` → `applyFoundationChange`, `getChapter`/`writeChapter`/`saveChapter`/`deleteChapter` → `chapter.get`/`write`/`saveFinal`/`delete`, `updateOutline` → `upsertFoundation` (outline keys), `getMeta` → `getFoundation`, `exportBook`/`importBook` → `exportSnapshot`/`importSnapshot`, `dispose` → `close` (+ terminate worker).
 
 ---
 

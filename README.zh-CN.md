@@ -209,7 +209,7 @@ if (outcome.status === "needs_foundation" && outcome.auditOnly) {
 }
 ```
 
-分层 Engine mock（卷/弧，弧末审阅 → `expand_next_arc`）：[`examples/layered-book.ts`](examples/layered-book.ts) · [指南 §2](docs/guide.zh-CN.md#scenario-layered-book) · `npm run test:layered`。长篇运行：`pauseBook` / `resumeBook` / `steerBook(message)` 转发到 `startBook` 期间持有的 Engine（main 与 worker）。没有在跑时调用会返回 `{ status: "idle" }`（空操作，不是异常）。
+分层 Engine mock（卷/弧，弧末审阅 → `expand_next_arc`）：[`examples/layered-book.ts`](examples/layered-book.ts) · [指南 §2](docs/guide.zh-CN.md#scenario-layered-book) · `npm run test:layered`。长篇运行：`pauseBook` / `resumeBook` / `steerBook(message)` 转发到 `startBook` 期间持有的 Engine（main 与 worker）。没有在跑时调用会返回 `{ status: "idle" }`（空操作，不是异常）。**新增（0.7.0）：** `cancelBook()` / 可选 `signal` 以 `AbortedError` 中止；`getRunState()` 为只读快照。
 
 <a id="change-meta"></a>
 
@@ -425,7 +425,7 @@ import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 
 名称一一对应 Session（不重写业务规则）。`dispose()` 之后再调任何方法都会抛 `KitClosedError`。
 
-Busy 标志（Session 的 `SessionBusyError`）：**`startBook`**、**`writeChapter`**、**`applyFoundation`**、**`deleteChapter`** 互斥。`pauseBook` / `resumeBook` / `steerBook` **不**占 busy（只在 `startBook` 的 Engine 在跑时生效）。`inspect` / `fillFoundation` / `generateFoundation` / `assessFoundation` / `getChapter` / `saveChapter` / `updateOutline` / 读取 / 导出 **不**占用该标志。
+Busy 标志（Session 的 `SessionBusyError`）：**`startBook`**、**`writeChapter`**、**`applyFoundation`**、**`deleteChapter`** 互斥。`pauseBook` / `resumeBook` / `steerBook` / **`cancelBook` / `getRunState`** **不**占 busy（`pause`/`steer` 只在 `startBook` 的 Engine 在跑时生效）。`inspect` / `fillFoundation` / `generateFoundation` / `assessFoundation` / `getChapter` / `saveChapter` / `updateOutline` / 读取 / 导出 **不**占用该标志。
 
 #### 检查 / 就绪
 
@@ -441,9 +441,11 @@ Busy 标志（Session 的 `SessionBusyError`）：**`startBook`**、**`writeChap
 | 方法 | 参数 | 返回 | 说明 |
 | --- | --- | --- | --- |
 | `fillFoundation(patch)` | `FoundationPatch` | `FoundationMeta` | Upsert。省略的键不变。数组**整文件替换**。指纹文件变化会作废 `foundation_audit`。**没有**评估 / 确认 |
-| `generateFoundation({ prompt, keys, mode? })` | keys：`book` \| `premise` \| `outline` \| `layered_outline` \| `characters` \| `world_rules` | `FoundationMeta` | 一次性 LLM，**JSON 在 `text` 里**（不是 toolCalls）。`mode`：`"fill_missing"`（默认）或 `"overwrite"`。需要 `llm` / Worker endpoint。**不是** Engine 循环，**不**占 busy |
-| `startBook({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps? })` | — | `AutoWriteResult` | 可选 upsert/generate，然后 `{ status: "needs_foundation", gaps, meta, auditOnly }` **或** `Engine.run` → `{ status: "completed" \| "stopped", result, meta }`。默认 `requireConfirmGaps: true`。`confirmAuditGap: true` 仅在剩下的缺口都是审查时放行。占 busy |
+| `generateFoundation({ prompt, keys, mode?, signal? })` | keys：`book` \| `premise` \| `outline` \| `layered_outline` \| `characters` \| `world_rules` | `FoundationMeta` | 一次性 LLM，**JSON 在 `text` 里**（不是 toolCalls）。`mode`：`"fill_missing"`（默认）或 `"overwrite"`。需要 `llm` / Worker endpoint。**不是** Engine 循环，**不**占 busy。**新增：** 可选 `signal` |
+| `startBook({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps?, signal? })` | — | `AutoWriteResult` | 可选 upsert/generate，然后 `{ status: "needs_foundation", gaps, meta, auditOnly }` **或** `Engine.run` → `{ status: "completed" \| "stopped", result, meta }`。默认 `requireConfirmGaps: true`。`confirmAuditGap: true` 仅在剩下的缺口都是审查时放行。占 busy。**新增：** 可选 `signal`。**兼容：** 不传 `signal` 即为 0.6.0 |
 | `pauseBook()` / `resumeBook()` / `steerBook(message)` | — | `{ status: "ok" \| "idle" }` | 转发到 `startBook` 期间持有的 Engine。没有在跑则为 `idle`（空操作）。空 steer 笔记抛 `EngineError`。不占 busy |
+| `cancelBook()` | — | `{ status: "ok" \| "idle" }` | **新增（0.7.0）。** 中止进行中的 start/generate/write。进行中的 Promise 以 `AbortedError` 拒绝。空闲为空操作。不占 busy |
+| `getRunState()` | — | `"idle" \| "generating_missing" \| "running" \| "paused" \| "busy"` | **新增（0.7.0）。** 纯观察。`running`/`paused` ↔ pause/steer 会是 `ok` |
 
 `generateFoundation` 的 keys 是 **snake_case**（`layered_outline`、`world_rules`）；patch 字段是 **camelCase**（`layeredOutline`、`worldRules`）。`BookMetadata` 只有 `{ title, synopsis }`。
 
@@ -489,7 +491,7 @@ Worker 模式下 `createBook` / `switchBook` 会拆掉上一个 kit worker，再
 
 来自 `novel-engine/kit`：`KitClosedError`、`KitLlmRequiredError`、`KitWorkerError`、`KitWorkspaceDisabledError`。
 
-来自 Session（方法原样抛出）：`FoundationIncompleteError`、`SessionLlmRequiredError`、`FoundationGenerateError`、`SessionBusyError`、`ChapterConflictError`、`ChapterRunnerError`、`SessionClosedError`、`BookNotFoundError`。
+来自 Session（方法原样抛出）：`FoundationIncompleteError`、`SessionLlmRequiredError`、`FoundationGenerateError`、`SessionBusyError`、`ChapterConflictError`、`ChapterRunnerError`、`SessionClosedError`、`BookNotFoundError`、**`AbortedError`**、**`LlmError`**、**`StoreRemoveUnsupportedError`**。
 
 <a id="lower-level"></a>
 
@@ -509,7 +511,7 @@ Kit 默认不合适时再用（自定义 `createStore`、脚本化 Engine 循环
 | 不经 Kit 用 OPFS | `createOpfsStore` / `OpfsStore.open` | `novel-engine` |
 | 供应商 fetch LLM | `createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm` / `createVendorLlm` | `novel-engine/llm` |
 
-Kit → Session 名称：`inspect` → `inspectFoundation`，`assertReady` → `assertReadyToWrite`，`fillFoundation` → `upsertFoundation`，`startBook` → `startAutoWrite`，`pauseBook`/`resumeBook`/`steerBook` → `pause`/`resume`/`steer`，`assessFoundation` → `assessFoundationImpact`，`applyFoundation` → `applyFoundationChange`，`getChapter`/`writeChapter`/`saveChapter`/`deleteChapter` → `chapter.get`/`write`/`saveFinal`/`delete`，`updateOutline` → `upsertFoundation`（大纲键），`getMeta` → `getFoundation`，`exportBook`/`importBook` → `exportSnapshot`/`importSnapshot`，`dispose` → `close`（外加终止 worker）。
+Kit → Session 名称：`inspect` → `inspectFoundation`，`assertReady` → `assertReadyToWrite`，`fillFoundation` → `upsertFoundation`，`startBook` → `startAutoWrite`，`pauseBook`/`resumeBook`/`steerBook` → `pause`/`resume`/`steer`，`cancelBook` → `cancel`，`getRunState` → `getRunState`，`assessFoundation` → `assessFoundationImpact`，`applyFoundation` → `applyFoundationChange`，`getChapter`/`writeChapter`/`saveChapter`/`deleteChapter` → `chapter.get`/`write`/`saveFinal`/`delete`，`updateOutline` → `upsertFoundation`（大纲键），`getMeta` → `getFoundation`，`exportBook`/`importBook` → `exportSnapshot`/`importSnapshot`，`dispose` → `close`（外加终止 worker）。
 
 ---
 

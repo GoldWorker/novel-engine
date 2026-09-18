@@ -36,6 +36,7 @@ export { route } from "./flow/index.js";
 
 export type {
   StorePort,
+  StoreOperation,
   LlmPort,
   LlmRole,
   LlmMessage,
@@ -44,6 +45,7 @@ export type {
   LlmCompletionRequest,
   LlmCompletionResult,
 } from "./ports/index.js";
+export { LlmError, StoreError, StoreRemoveUnsupportedError } from "./ports/index.js";
 
 export {
   MemoryStore,
@@ -103,7 +105,7 @@ export type {
 export { MockLlm, ReplayLlm } from "./llm/index.js";
 export type { MockLlmHandler, MockLlmStep } from "./llm/index.js";
 
-export { createEngine, Engine, EngineError } from "./engine/index.js";
+export { createEngine, Engine, EngineError, AbortedError } from "./engine/index.js";
 export { inferPlanningStub } from "./engine/plan-start.js";
 export type {
   EngineDeps,

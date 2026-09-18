@@ -6,6 +6,7 @@ export type FetchRequestInit = {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  signal?: AbortSignal;
 };
 
 export type FetchResponseLike = {

@@ -15,6 +15,7 @@ export type {
 } from "../../ports/llm.js";
 
 export { LlmAdapterError } from "./error.js";
+export { LlmError } from "../../ports/llm.js";
 export { createOpenAiLlm, createDashScopeLlm } from "./openai.js";
 export { createAnthropicLlm } from "./anthropic.js";
 export { createVendorLlm } from "./vendor.js";

@@ -1,4 +1,6 @@
+import { raceAbort, throwIfAborted } from "../abort.js";
 import type {
+  LlmCompletionRequest,
   LlmCompletionResult,
   LlmMessage,
   LlmPort,
@@ -34,8 +36,9 @@ export async function runWorker(
   llm: LlmPort,
   instruction: Instruction,
   maxTurns = DEFAULT_MAX_TURNS,
+  signal?: AbortSignal,
 ): Promise<void> {
-  await runToolLoop(store, llm, instruction, toolsFor(instruction.agent), maxTurns);
+  await runToolLoop(store, llm, instruction, toolsFor(instruction.agent), maxTurns, signal);
 }
 
 function toolsFor(agent: Instruction["agent"]): (store: StorePort) => Tool[] {
@@ -56,6 +59,7 @@ async function runToolLoop(
   instruction: Instruction,
   factory: (store: StorePort) => Tool[],
   maxTurns: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   const tools = factory(store);
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
@@ -65,11 +69,16 @@ async function runToolLoop(
   ];
 
   for (let turn = 0; turn < maxTurns; turn++) {
-    const result = await llm.complete({
+    throwIfAborted(signal);
+    const request: LlmCompletionRequest = {
       messages,
       agent: instruction.agent,
       tools: tools.map((tool) => ({ name: tool.name, description: tool.description })),
-    });
+    };
+    if (signal !== undefined) {
+      request.signal = signal;
+    }
+    const result = await raceAbort(llm.complete(request), signal);
     const calls = extractToolCalls(result);
     if (calls.length === 0) {
       return;
@@ -79,6 +88,7 @@ async function runToolLoop(
     messages.push(assistant);
 
     for (const call of calls) {
+      throwIfAborted(signal);
       const tool = byName.get(call.name);
       if (!tool) {
         throw new WorkerError(`unknown tool: ${call.name}`);

@@ -1,3 +1,4 @@
+import { raceAbort, throwIfAborted } from "../abort.js";
 import type {
   LlmCompletionRequest,
   LlmCompletionResult,
@@ -32,17 +33,18 @@ export class MockLlm implements LlmPort {
   }
 
   async complete(request: LlmCompletionRequest): Promise<LlmCompletionResult> {
+    throwIfAborted(request.signal);
     this.calls.push(request);
     const step = this.script[this.index];
     this.index += 1;
     if (typeof step === "function") {
-      return step(request);
+      return raceAbort(Promise.resolve(step(request)), request.signal);
     }
     if (step) {
       return step;
     }
     if (this.fallback) {
-      return this.fallback(request);
+      return raceAbort(Promise.resolve(this.fallback(request)), request.signal);
     }
     throw new Error(`MockLlm: script exhausted at call ${this.index}`);
   }
@@ -62,6 +64,7 @@ export class ReplayLlm implements LlmPort {
   }
 
   async complete(request: LlmCompletionRequest): Promise<LlmCompletionResult> {
+    throwIfAborted(request.signal);
     this.calls.push(request);
     const next = this.fixtures[this.index];
     this.index += 1;

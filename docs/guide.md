@@ -221,6 +221,7 @@ Names map 1:1 onto Session (no second copy of the rules):
 | `generateFoundation` | `generateFoundation` |
 | `startBook` | `startAutoWrite` |
 | `pauseBook` / `resumeBook` / `steerBook` | `pause` / `resume` / `steer` |
+| `cancelBook` / `getRunState` | `cancel` / `getRunState` |
 | `assessFoundation` | `assessFoundationImpact` |
 | `applyFoundation` | `applyFoundationChange` |
 | `getChapter` / `writeChapter` / `saveChapter` / `deleteChapter` | `chapter.get` / `write` / `saveFinal` / `delete` |
@@ -242,6 +243,8 @@ Preserved Session behavior:
 `startBook` may return `{ status: "needs_foundation", gaps, meta, auditOnly }` without `Engine.run` (default `requireConfirmGaps: true`). After book/premise/outline/characters/worldRules exist, the leftover gap is often `foundation_audit` (`auditOnly: true`) — `generateMissing` cannot fill it (Engine writes the audit). Confirm in the UI, then retry with **`confirmAuditGap: true`**. That does **not** skip non-audit gaps (unlike `requireConfirmGaps: false`).
 
 While `startBook` is in flight, `pauseBook` / `resumeBook` / `steerBook(message)` forward to the Engine instance held during that run (same on `runtime: "worker"`). When nothing is running they return `{ status: "idle" }` (no-op, not an exception). They do **not** take the busy flag. Empty steer notes throw `EngineError`. `subscribe` emits `paused` / `resumed` / `steered` from that Engine.
+
+**Added (0.7.0):** `cancelBook()` / optional `signal` on `startBook` / `generateFoundation` / `writeChapter` abort the in-flight run with `AbortedError`. Idle cancel is `{ status: "idle" }`. `getRunState()` is a side-effect-free snapshot (`idle` / `generating_missing` / `running` / `paused` / `busy`). **Compatible:** omit `signal` and do not call `cancelBook` — 0.6.0 behavior.
 
 When `workspace: false` (or a custom `StorePort`), multi-book methods throw a clear `KitWorkspaceDisabledError`.
 
@@ -305,7 +308,7 @@ Shared options: `apiKey`, `model`, optional `baseUrl`, `fetch`, `headers`.
 
 `createDashScopeLlm` **reuses** the OpenAI-shaped client. Pass `baseUrl` for Singapore / US / other regions (must include `/compatible-mode/v1`). Example: `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`.
 
-Anthropic extra options: `maxTokens` (default `4096`), `anthropicVersion` (default `2023-06-01`). HTTP failures throw `LlmAdapterError` (`status?`, `body?`).
+Anthropic extra options: `maxTokens` (default `4096`), `anthropicVersion` (default `2023-06-01`). HTTP failures throw `LlmAdapterError` (`status?`, `body?`). **Added (0.7.0):** `LlmAdapterError` extends portable `LlmError` (same fields). Kit worker `llmEndpoint` fetch throws `LlmError` (not a generic `Error`).
 
 ### Mapping
 

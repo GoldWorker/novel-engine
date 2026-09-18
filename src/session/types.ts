@@ -95,6 +95,8 @@ export interface GenerateFoundationOptions {
   prompt: string;
   keys: readonly FoundationKey[];
   mode?: FoundationGenerateMode;
+  /** Opt-in abort for the one-shot LLM completion. */
+  signal?: AbortSignal;
 }
 
 export const FOUNDATION_IMPACT_SEVERITIES = ["meta_only", "forward_only", "rewrite_needed"] as const;
@@ -183,6 +185,8 @@ export interface StartAutoWriteOptions {
    */
   confirmAuditGap?: boolean;
   maxSteps?: number;
+  /** Opt-in abort for generateMissing + Engine.run. */
+  signal?: AbortSignal;
 }
 
 export interface AutoWriteNeedsFoundation {
@@ -222,6 +226,8 @@ export interface ChapterWriteInput {
   title?: string;
   /** When `mode` is `create` and a final already exists, overwrite instead of `ChapterConflictError`. */
   force?: boolean;
+  /** Opt-in abort for the writer loop. */
+  signal?: AbortSignal;
 }
 
 export interface ChapterWriteResult {
@@ -267,6 +273,25 @@ export interface BookControlResult {
    */
   status: BookControlStatus;
 }
+
+/**
+ * Snapshot of session activity. Pure observation — does not take the busy flag
+ * and has no side effects.
+ *
+ * - `idle` — nothing in flight; `pause` / `resume` / `steer` / `cancel` are idle.
+ * - `generating_missing` — `generateFoundation`, or `startAutoWrite` before `Engine.run`.
+ * - `running` — `Engine.run` in flight and not paused; pause/steer would be `ok`.
+ * - `paused` — `Engine.run` in flight with pause requested; resume would be `ok`.
+ * - `busy` — other busy work (`chapter.write` / `chapter.delete` / `applyFoundationChange`).
+ */
+export const SESSION_RUN_STATES = [
+  "idle",
+  "generating_missing",
+  "running",
+  "paused",
+  "busy",
+] as const;
+export type SessionRunState = (typeof SESSION_RUN_STATES)[number];
 
 /** Kit `updateOutline` patch: upsert of outline keys only (no assess/confirm). */
 export type OutlineUpdate = Pick<FoundationPatch, "outline" | "layeredOutline">;
@@ -318,6 +343,18 @@ export interface NovelSession {
   resume(): Promise<BookControlResult>;
   /** Empty note throws `EngineError`. Idle when no auto-write Engine is running. */
   steer(note: string): Promise<BookControlResult>;
+  /**
+   * Abort in-flight `startAutoWrite` / `generateFoundation` / `chapter.write`
+   * (and other busy work). Clears busy and `runningEngine`. The in-flight
+   * promise rejects with `AbortedError`. No-op `{ status: "idle" }` when idle.
+   * Does not take the busy flag.
+   */
+  cancel(): Promise<BookControlResult>;
+  /**
+   * Pure observation of session activity. Does not take the busy flag.
+   * `running` / `paused` ↔ pause/steer would be `ok`; otherwise they are `idle`.
+   */
+  getRunState(): Promise<SessionRunState>;
   subscribe(listener: (event: SessionEvent) => void): SessionUnsubscribe;
   close(): void;
 }

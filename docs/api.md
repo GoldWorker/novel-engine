@@ -1,4 +1,4 @@
-# novel-engine API (0.5.0)
+# novel-engine API (0.7.0)
 
 [English](api.md) | [中文文档](api.zh-CN.md)
 
@@ -36,13 +36,14 @@ import { NovelKit } from "novel-engine/kit";
 | `createEngine(deps)` | fn | Builds an `Engine`. Required: `store`, `llm`. Optional: `maxSteps` (40), `maxWorkerTurns` (16), `onEvent`. |
 | `Engine` | class | Serial loop: load state → `route` → Worker tools → repeat. |
 | `EngineError` | class | Invalid `steer` / double-`run`. |
+| `AbortedError` | class | **Added (0.7.0).** `engine.cancel()` / `run({ signal })` abort. Not an `EngineResult` stop reason. |
 | `EngineDeps` | type | Constructor input. |
 | `EngineResult` | type | `{ phase, steps, stoppedReason, lastInstruction, error? }`. |
 | `EngineStopReason` | type | `"complete" \| "max_steps" \| "paused" \| "idle"`. |
 | `EngineLoopEvent` | type | `step` / `paused` / `resumed` / `steered` / `stopped`. |
 | `inferPlanningStub(prompt)` | fn | Keyword stub: `长篇` → long, `中篇`/`分层` → mid, else short. |
 
-`Engine.run({ prompt, maxSteps })` bootstraps Progress, then loops until complete / idle / pause / cap. `pause` / `resume` / `steer` are cooperative (next loop boundary). `steer` persists a decision and sets `flow=steering`.
+`Engine.run({ prompt, maxSteps, signal? })` bootstraps Progress, then loops until complete / idle / pause / cap. `pause` / `resume` / `steer` are cooperative (next loop boundary). `steer` persists a decision and sets `flow=steering`. **Added (0.7.0):** optional `signal` and `engine.cancel()` abort the in-flight run with `AbortedError` (idle cancel is a no-op). **Compatible:** omitting `signal` matches 0.6.0.
 
 Same-thread host:
 
@@ -77,9 +78,11 @@ Same-thread mocks: [guide §1 (short book)](guide.md#scenario-short-book) and [g
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `StorePort` | type | `loadState`, `loadProgress`, `saveProgress`, `read`, `write`, `has`, optional `list`. |
-| `LlmPort` | type | `complete(request) → { text, toolCalls? }`. |
-| `LlmCompletionRequest` / `LlmCompletionResult` / `LlmToolCall` / `LlmMessage` / `LlmToolSpec` / `LlmRole` | types | Completion wire types. |
+| `StorePort` | type | `loadState`, `loadProgress`, `saveProgress`, `read`, `write`, `has`, optional `list` / `remove`. |
+| `LlmPort` | type | `complete(request) → { text, toolCalls? }`. Optional `request.signal`. |
+| `LlmCompletionRequest` / `LlmCompletionResult` / `LlmToolCall` / `LlmMessage` / `LlmToolSpec` / `LlmRole` | types | Completion wire types. Optional `signal` on the request (**Added 0.7.0**). |
+| `LlmError` | class | **Added (0.7.0).** Portable `complete` failure (`status?`, `body?`). Kit `llmEndpoint` fetch throws this. |
+| `StoreError` / `StoreRemoveUnsupportedError` | class | **Added (0.7.0).** Store failures hosts hit. `chapter.delete` throws `StoreRemoveUnsupportedError` when `remove` is missing (before progress mutation). |
 
 Hosts implement `LlmPort` against a gateway or WebLLM, or import optional fetch adapters from [`novel-engine/llm`](guide.md#scenario-llm). Default entries never ship a provider client. **Do not expose raw API keys in a public browser app.**
 
@@ -136,7 +139,7 @@ Not part of `.` or `./worker`. Fetch-based; no `openai` / `@anthropic-ai/sdk` de
 | `createAnthropicLlm(options)` | fn | Messages API. Default base `https://api.anthropic.com`. `maxTokens` default 4096. |
 | `createDashScopeLlm(options)` | fn | OpenAI-compatible DashScope (`compatible-mode/v1`). Reuses the OpenAI client. |
 | `createVendorLlm({ provider, ... })` | fn | `provider`: `"openai"` \| `"anthropic"` \| `"dashscope"`. |
-| `LlmAdapterError` | class | HTTP / mapping failures (`status?`, `body?`). |
+| `LlmAdapterError` | class | HTTP / mapping failures (`status?`, `body?`). **Compatible:** still this class. **Added:** subclass of `LlmError` (also re-exported). |
 | `OPENAI_DEFAULT_BASE_URL` / `ANTHROPIC_DEFAULT_BASE_URL` / `DASHSCOPE_COMPAT_BASE_URL` | const | Documented defaults. |
 | `LlmAdapterOptions` / `OpenAiLlmOptions` / `AnthropicLlmOptions` / `DashScopeLlmOptions` / `VendorLlmOptions` / `LlmVendor` / `FetchLike` | types | `apiKey`, `model`, optional `baseUrl`, `fetch`, `headers`. |
 
@@ -159,7 +162,7 @@ S1–S3 stay on a **same-thread** `NovelSession` (source of truth). **S4** is an
 | Export | Kind | Notes |
 | --- | --- | --- |
 | `createNovelSession({ store, llm?, bookId })` | fn | Same-thread session. `llm` required for S2 generate / auto-write, S3 `chapter.write`, and S6 `rewriteChapters`. |
-| `NovelSession` | type | Inspect + `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `chapter` / `subscribe` / snapshot wrappers / `close`. |
+| `NovelSession` | type | Inspect + generate / apply / auto-write / `chapter` / `pause`/`resume`/`steer` / **Added:** `cancel` / `getRunState` / snapshot / `close`. |
 | `createNovelWorkspace({ createStore, llm?, indexStore? })` | fn | One store per `bookId`. Optional `indexStore` persists `_index.json`. |
 | `NovelWorkspace` | type | `createBook` / `open` / `switchTo` / `listBooks` / `close` / `currentBookId`. |
 | `createSessionClient(port, { bookId })` | fn | S4 main-thread `NovelSession` over messages. |
@@ -172,6 +175,9 @@ S1–S3 stay on a **same-thread** `NovelSession` (source of truth). **S4** is an
 | `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`. |
 | `SessionLlmRequiredError` / `FoundationGenerateError` | class | Missing `llm`; bad generate JSON / keys. |
 | `SessionBusyError` | class | `startAutoWrite` / `chapter.write` / `chapter.delete` / `applyFoundationChange` already in flight (including over the bridge). |
+| `AbortedError` | class | **Added (0.7.0).** In-flight cancel / aborted `signal`. Dedicated class; non-abort success paths unchanged. |
+| `LlmError` / `StoreError` / `StoreRemoveUnsupportedError` | class | **Added (0.7.0).** LLM complete / store delete failures (Worker-serializable). |
+| `SessionRunState` / `SESSION_RUN_STATES` | type / const | **Added (0.7.0).** `"idle" \| "generating_missing" \| "running" \| "paused" \| "busy"`. |
 | `ChapterConflictError` / `ChapterRunnerError` | class | Chapter mode precondition; writer loop / `saveFinal` failure. |
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | Closed session/workspace; unknown `bookId`. |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`. |
@@ -212,11 +218,13 @@ Inference order, fingerprint skip, and audit reporting: [architecture](architect
 | `listArtifacts(prefix?)` | `listStorePaths`. |
 | `exportSnapshot()` / `importSnapshot(bytes)` | Thin wrappers around the existing book-snapshot APIs. |
 | `upsertFoundation(patch)` | Partial write of `book` / `premise` / `outline` / `layeredOutline` / `characters` / `worldRules` (omitted keys unchanged; provided arrays replace the whole file). Invalidates `meta/foundation_audit.json` when fingerprint files change. |
-| `generateFoundation({ prompt, keys, mode? })` | Structured one-shot `LlmPort.complete`; parse JSON from `text`; `upsertFoundation`. **Not** an Engine loop. |
+| `generateFoundation({ prompt, keys, mode?, signal? })` | Structured one-shot `LlmPort.complete`; parse JSON from `text`; `upsertFoundation`. **Not** an Engine loop. **Added:** optional `signal`. |
 | `assessFoundationImpact(patch, { refineWithLlm? })` | S5: rules-first impact of a **proposed** patch. Optional LLM JSON refine. **Does not mutate**. |
 | `applyFoundationChange({ patch, confirmRewrite?, rewriteChapters?, … })` | S6: assess → confirm gate → upsert → optional sequential `chapter.write`. |
-| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps? })` | Optional upsert/generate, then either `{ status: "needs_foundation", gaps, meta, auditOnly }` or `createEngine(...).run`. Mutually exclusive with `chapter.write` / `chapter.delete` / `applyFoundationChange` (`SessionBusyError`). |
+| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps?, signal? })` | Optional upsert/generate, then either `{ status: "needs_foundation", gaps, meta, auditOnly }` or `createEngine(...).run`. Mutually exclusive with `chapter.write` / `chapter.delete` / `applyFoundationChange` (`SessionBusyError`). **Added:** optional `signal`. **Compatible:** omitting `signal` matches 0.6.0. |
 | `pause()` / `resume()` / `steer(note)` | Forward to the Engine held during `startAutoWrite`. `{ status: "ok" \| "idle" }`. `idle` when no Engine is running (no-op). Empty steer throws `EngineError`. Do **not** take the busy flag. |
+| `cancel()` | **Added (0.7.0).** Abort in-flight `startAutoWrite` / `generateFoundation` / `chapter.write` (and other busy work). `{ status: "ok" \| "idle" }`. In-flight promise rejects `AbortedError`. Idle is a no-op. Does **not** take the busy flag. |
+| `getRunState()` | **Added (0.7.0).** `"idle" \| "generating_missing" \| "running" \| "paused" \| "busy"`. Pure observation. `running`/`paused` ↔ pause/steer would be `ok`. |
 | `chapter` | S3 ChapterRunner: `get` / `saveFinal` / `write` / `delete`. Same-thread; not an Engine book Route. |
 | `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped` / `paused` / `resumed` / `steered`. Returns unsubscribe. |
 | `close()` | Further calls throw `SessionClosedError`. |
@@ -255,6 +263,7 @@ Light shape checks, then `writeJson` / `writeText` on existing `PATHS`. **Omitte
 - `mode`: `fill_missing` (default) — only keys that `inspectFoundation` still reports as gaps — or `overwrite`
 - Requires `llm` on `createNovelSession`
 - One `LlmPort.complete` with **no tools**. The model must return a **JSON object in `text`** (optional ` ```json ` fence). Parsed fields are passed to `upsertFoundation`.
+- **Added (0.7.0):** optional `signal`. Abort / `session.cancel()` rejects with `AbortedError`. **Compatible:** omitting `signal` matches 0.6.0.
 - MockLlm: `{ text: JSON.stringify({ premise: "…", outline: [/* … */] }) }`
 
 #### `startAutoWrite`
@@ -265,11 +274,13 @@ Light shape checks, then `writeJson` / `writeText` on existing `PATHS`. **Omitte
 4. If `requireConfirmGaps !== false` (default **true**) and `gaps.length > 0`:
    - If leftover gaps are **only** `foundation_audit` **and** `confirmAuditGap: true` → proceed to Engine
    - Else → `{ status: "needs_foundation", gaps, meta, auditOnly }` **without** `Engine.run`
-5. If ready (or confirm disabled / audit confirmed) → `createEngine({ store, llm }).run({ prompt, maxSteps })` → `{ status: "completed" | "stopped", result, meta }` (`completed` when `stoppedReason === "complete"`)
+5. If ready (or confirm disabled / audit confirmed) → `createEngine({ store, llm }).run({ prompt, maxSteps, signal? })` → `{ status: "completed" | "stopped", result, meta }` (`completed` when `stoppedReason === "complete"`)
 
-`subscribe` emits `foundation_updated` after upsert, `auto_write_step` for each Engine `step`, `paused` / `resumed` / `steered` from the held Engine, `chapter_step` during `chapter.write`, and `stopped` for both needs-foundation and Engine outcomes.
+**Added (0.7.0):** optional `signal`; `cancel()` aborts generateMissing + Engine.run with `AbortedError` (does **not** add an abort status to `AutoWriteResult`). **Compatible:** without `signal` / `cancel()`, 0.6.0 shapes stand.
 
-`startAutoWrite`, `chapter.write`, `chapter.delete`, and `applyFoundationChange` share a session busy flag: a second call while one is in flight throws `SessionBusyError`. `pause` / `resume` / `steer` do **not** take that flag (they only apply once `Engine.run` has started). See [architecture](architecture.md#busy--session-lifecycle).
+`subscribe` emits `foundation_updated` after upsert, `auto_write_step` for each Engine `step`, `paused` / `resumed` / `steered` from the held Engine, `chapter_step` during `chapter.write`, and `stopped` for both needs-foundation and Engine outcomes (not on abort — the promise rejects).
+
+`startAutoWrite`, `chapter.write`, `chapter.delete`, and `applyFoundationChange` share a session busy flag: a second call while one is in flight throws `SessionBusyError`. `pause` / `resume` / `steer` / **`cancel` / `getRunState`** do **not** take that flag (`pause`/`steer` only apply once `Engine.run` has started). See [architecture](architecture.md#busy--session-lifecycle).
 
 ### S1 — `NovelWorkspace`
 
@@ -293,8 +304,8 @@ Single-chapter create / continue / rewrite / polish on the **same-thread** sessi
 | --- | --- |
 | `chapter.get(n)` | `{ chapter, plan, draft, final, summary }` from `drafts/NN.*`, `chapters/NN.md`, `summaries/NN.json`. `null` when none exist. |
 | `chapter.saveFinal(n, markdown)` | Writes `chapters/NN.md`, updates `progress.completedChapters` / checkpoint. No LLM. |
-| `chapter.write({ chapter, mode, instruction?, title?, force? })` | Dedicated writer loop over `LlmPort` + existing writer tools. Requires `llm`. |
-| `chapter.delete(n, { syncOutline? })` | Removes plan/draft/final/summary. Drops `n` from `completedChapters` / `pendingRewrites`; clamps `currentChapter`; `complete` → `writing` if a completed chapter was removed. `totalChapters` unchanged. `syncOutline` upserts outline files without that row (no renumbering; last remaining flat-outline row unsupported). Busy. Reviews (`reviews/*`) are left in place. |
+| `chapter.write({ chapter, mode, instruction?, title?, force?, signal? })` | Dedicated writer loop over `LlmPort` + existing writer tools. Requires `llm`. **Added:** optional `signal`. |
+| `chapter.delete(n, { syncOutline? })` | Removes plan/draft/final/summary. Drops `n` from `completedChapters` / `pendingRewrites`; clamps `currentChapter`; `complete` → `writing` if a completed chapter was removed. `totalChapters` unchanged. `syncOutline` upserts outline files without that row (no renumbering; last remaining flat-outline row unsupported). Busy. Reviews (`reviews/*`) are left in place. **Requires `StorePort.remove`** — throws `StoreRemoveUnsupportedError` before mutating progress when absent. MemoryStore / OpfsStore success path unchanged. |
 
 #### Modes
 
@@ -321,8 +332,8 @@ Same-thread `NovelSession` remains the implementation. `attachSessionWorker` con
 | --- | --- |
 | `attachSessionWorker(port, { createSession })` | Worker adapter. `createSession` injects `StorePort` + `LlmPort` and returns `createNovelSession(...)`. |
 | `createSessionClient(port, { bookId })` | Main-thread `NovelSession`. `bookId` must match the worker session. |
-| Protocol | `SESSION_PROTOCOL === 1`, `ns: "session"`. Commands: `inspectFoundation` / `getFoundation` / `getProgress` / `assertReadyToWrite` / `listArtifacts` / `exportSnapshot` / `importSnapshot` / `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `pause` / `resume` / `steer` / `chapterGet` / `chapterSaveFinal` / `chapterWrite` / `chapterDelete` / `close`. Notices: `result` / `event` / `error`. |
-| Busy | Worker-side `SessionBusyError` — `startAutoWrite` / `applyFoundationChange` / `chapter.delete` in flight blocks `chapter.write` across the bridge. `pause` / `resume` / `steer` are allowed during `startAutoWrite`. |
+| Protocol | `SESSION_PROTOCOL === 1`, `ns: "session"`. Commands: `inspectFoundation` / `getFoundation` / `getProgress` / `assertReadyToWrite` / `listArtifacts` / `exportSnapshot` / `importSnapshot` / `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `pause` / `resume` / `steer` / **`cancel` / `getRunState`** / `chapterGet` / `chapterSaveFinal` / `chapterWrite` / `chapterDelete` / `close`. Notices: `result` / `event` / `error`. **Compatible:** protocol version still `1`; new commands are additive. `AbortSignal` is **not** posted (host `signal` → client sends `cancel`). |
+| Busy | Worker-side `SessionBusyError` — `startAutoWrite` / `applyFoundationChange` / `chapter.delete` in flight blocks `chapter.write` across the bridge. `pause` / `resume` / `steer` / `cancel` / `getRunState` are allowed during `startAutoWrite`. |
 | Events | Worker forwards `subscribe` events (`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped` / `paused` / `resumed` / `steered`). |
 | `generateFoundation` / S5–S6 | **Run in the worker** (the book `StorePort` lives there). |
 | `LlmPort` | `fetch` a host BFF. **Do not embed vendor API keys** in a public worker bundle. |
@@ -372,6 +383,9 @@ Host scenarios: [§7.2a](guide.md#scenario-session-impact-assess) · [§7.2b](gu
 | `SessionLlmRequiredError` | `generateFoundation` / Engine `startAutoWrite` / `chapter.write` / `applyFoundationChange({ rewriteChapters: true })` without `llm`. |
 | `FoundationGenerateError` | Bad `keys`, or `complete().text` is not a JSON object. |
 | `SessionBusyError` | `startAutoWrite`, `chapter.write`, `chapter.delete`, or `applyFoundationChange` while another is in flight (same-thread and over the Worker bridge). |
+| `AbortedError` | **Added (0.7.0).** Host called `cancel()` / aborted `signal` during a long task. |
+| `LlmError` | **Added (0.7.0).** `LlmPort.complete` / kit `llmEndpoint` HTTP or mapping failure (`status?`, `body?`). |
+| `StoreRemoveUnsupportedError` | **Added (0.7.0).** `chapter.delete` when `StorePort.remove` is missing. No progress mutation. |
 | `ChapterConflictError` | Mode precondition failed (create on existing final, continue without draft, rewrite/polish without final). |
 | `ChapterRunnerError` | Invalid chapter number, empty `saveFinal`, or the writer loop produced no final. |
 | `SessionClosedError` | Method on a closed session (including after `switchTo`). |
@@ -403,7 +417,7 @@ Not part of `.`, `./worker`, `./llm`, or `./session`. Out-of-the-box façade: **
 
 `llm` is required for `runtime: "main"`, optional for worker (worker uses `llmEndpoint`; if both are passed, worker uses `llmEndpoint`). `bookId` default `"default"`. OPFS missing → `MemoryStore` when `fallbackToMemory` is true (default).
 
-Kit methods wrap Session 1:1 including `pauseBook` / `resumeBook` / `steerBook`, `deleteChapter`, `updateOutline` (upsert, no assess/confirm). `startBook` accepts `confirmAuditGap`.
+Kit methods wrap Session 1:1 including `pauseBook` / `resumeBook` / `steerBook`, **`cancelBook` / `getRunState`**, `deleteChapter`, `updateOutline` (upsert, no assess/confirm). `startBook` accepts `confirmAuditGap` and optional `signal`.
 
 Sketch: [`examples/kit-host.ts`](../examples/kit-host.ts).
 

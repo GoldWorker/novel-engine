@@ -1,7 +1,8 @@
+import { raceAbort, throwIfAborted } from "../abort.js";
 import type { Progress } from "../domain/progress.js";
 import { latestCompleted } from "../domain/progress.js";
-import type { LlmMessage, LlmPort, LlmToolCall } from "../ports/llm.js";
-import type { StorePort } from "../ports/store.js";
+import type { LlmCompletionRequest, LlmMessage, LlmPort, LlmToolCall } from "../ports/llm.js";
+import { requireStoreRemove, type StorePort } from "../ports/store.js";
 import type { ChapterPlan, ChapterSummary, OutlineEntry, VolumeOutline } from "../store/artifacts.js";
 import { appendCheckpoint } from "../store/audit.js";
 import { readJson, readText, writeJson, writeText } from "../store/io.js";
@@ -15,7 +16,6 @@ import {
 } from "../store/paths.js";
 import { writerTools } from "../workers/tools.js";
 import { ChapterConflictError, ChapterRunnerError } from "./errors.js";
-import { removeStorePath } from "./foundation-write.js";
 import type {
   ChapterDeleteOptions,
   ChapterDeleteResult,
@@ -100,6 +100,7 @@ export async function runChapterWrite(
   llm: LlmPort,
   input: ChapterWriteInput,
   emit: (event: SessionEvent) => void,
+  signal?: AbortSignal,
 ): Promise<ChapterWriteResult> {
   const chapter = input.chapter;
   assertChapterNumber(chapter);
@@ -107,6 +108,7 @@ export async function runChapterWrite(
   if (!CHAPTER_WRITE_MODES.includes(mode)) {
     throw new ChapterRunnerError(`unknown chapter write mode: ${String(mode)}`);
   }
+  throwIfAborted(signal);
   await assertModePreconditions(store, chapter, mode, input.force === true);
   await ensureWritingProgress(store, chapter);
 
@@ -120,11 +122,16 @@ export async function runChapterWrite(
 
   let turns = 0;
   for (let turn = 0; turn < DEFAULT_MAX_TURNS; turn++) {
-    const result = await llm.complete({
+    throwIfAborted(signal);
+    const request: LlmCompletionRequest = {
       messages,
       agent: "writer",
       tools: tools.map((tool) => ({ name: tool.name, description: tool.description })),
-    });
+    };
+    if (signal !== undefined) {
+      request.signal = signal;
+    }
+    const result = await raceAbort(llm.complete(request), signal);
     const calls = extractToolCalls(result);
     if (calls.length === 0) {
       break;
@@ -132,6 +139,7 @@ export async function runChapterWrite(
     turns += 1;
     messages.push({ role: "assistant", content: result.text });
     for (const call of calls) {
+      throwIfAborted(signal);
       const tool = byName.get(call.name);
       if (!tool) {
         throw new ChapterRunnerError(`unknown writer tool: ${call.name}`);
@@ -162,7 +170,7 @@ export function createChapterRunner(hooks: {
   store: StorePort;
   requireOpen: () => void;
   requireLlm: () => LlmPort;
-  withBusy: <T>(fn: () => Promise<T>) => Promise<T>;
+  withBusy: <T>(fn: (signal: AbortSignal) => Promise<T>, external?: AbortSignal) => Promise<T>;
   emit: (event: SessionEvent) => void;
   upsertFoundation: (patch: FoundationPatch) => Promise<FoundationMeta>;
 }): ChapterRunner {
@@ -178,7 +186,10 @@ export function createChapterRunner(hooks: {
     async write(input: ChapterWriteInput): Promise<ChapterWriteResult> {
       hooks.requireOpen();
       const llm = hooks.requireLlm();
-      return hooks.withBusy(() => runChapterWrite(hooks.store, llm, input, hooks.emit));
+      return hooks.withBusy(
+        (signal) => runChapterWrite(hooks.store, llm, input, hooks.emit, signal),
+        input.signal,
+      );
     },
     async delete(
       chapter: number,
@@ -310,11 +321,12 @@ export async function deleteChapter(
   upsertFoundation: (patch: FoundationPatch) => Promise<FoundationMeta>,
 ): Promise<ChapterDeleteResult> {
   assertChapterNumber(chapter);
+  const remove = requireStoreRemove(store);
   const removed: string[] = [];
   for (const pathOf of CHAPTER_ARTIFACT_PATHS) {
     const path = pathOf(chapter);
     if (await store.has(path)) {
-      await removeStorePath(store, path);
+      await remove(path);
       if (!(await store.has(path))) {
         removed.push(path);
       }

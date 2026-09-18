@@ -137,9 +137,9 @@ Event kinds: `started` | `step` | `paused` | `resumed` | `steered` | `stopped`.
 
 Commands (additive S5/S6 included):
 
-`inspectFoundation` | `getFoundation` | `getProgress` | `assertReadyToWrite` | `listArtifacts` | `exportSnapshot` | `importSnapshot` | `upsertFoundation` | `generateFoundation` | `assessFoundationImpact` | `applyFoundationChange` | `startAutoWrite` | `pause` | `resume` | `steer` | `chapterGet` | `chapterSaveFinal` | `chapterWrite` | `chapterDelete` | `close`
+`inspectFoundation` | `getFoundation` | `getProgress` | `assertReadyToWrite` | `listArtifacts` | `exportSnapshot` | `importSnapshot` | `upsertFoundation` | `generateFoundation` | `assessFoundationImpact` | `applyFoundationChange` | `startAutoWrite` | `pause` | `resume` | `steer` | `cancel` | `getRunState` | `chapterGet` | `chapterSaveFinal` | `chapterWrite` | `chapterDelete` | `close`
 
-Notices: `result` | `event` | `error`.
+Notices: `result` | `event` | `error`. **Compatible (0.7.0):** `SESSION_PROTOCOL` stays `1`; `cancel` / `getRunState` are additive. `AbortSignal` is not structured-cloned — the client maps host `signal` to a `cancel` RPC.
 
 `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` **run in the worker** because the book `StorePort` lives there (typically OPFS). A main-thread generate/apply would write a different store.
 
@@ -167,7 +167,9 @@ Kit is composition + defaults. It does **not** change Session/Engine protocols.
 
 `pause` / `resume` / `steer` do **not** take the busy flag. They forward to the Engine instance held during `startAutoWrite` → `Engine.run`. When no Engine is running they return `{ status: "idle" }`. During `generateMissing` (before `Engine.run`) they are idle. Empty steer notes throw `EngineError`.
 
-Reads (`getFoundation`, `inspectFoundation`, `assessFoundationImpact`, `chapter.get`, …) do not take the busy flag. Session does **not** cache artifacts — every read is store read-through.
+**Added (0.7.0):** `cancel()` / `cancelBook()` also skip the busy flag. Idle cancel is `{ status: "idle" }`. An in-flight long task (`startAutoWrite`, `generateFoundation`, `chapter.write`, …) rejects with `AbortedError`, then busy and `runningEngine` are cleared. `getRunState()` is a pure read (`"idle" | "generating_missing" | "running" | "paused" | "busy"`): `running` / `paused` means pause/steer would be `ok`; other states mean they would be `idle`. Optional `signal` on start/generate/write is host opt-in; omitting it matches 0.6.0.
+
+Reads (`getFoundation`, `inspectFoundation`, `assessFoundationImpact`, `chapter.get`, `getRunState`, …) do not take the busy flag. Session does **not** cache artifacts — every read is store read-through.
 
 `close()` / workspace `switchTo` / `open` close the previous session. Reusing the old reference throws `SessionClosedError`.
 

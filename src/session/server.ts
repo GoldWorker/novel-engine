@@ -79,6 +79,18 @@ export function attachSessionWorker(
     if (payload.bookId !== undefined) {
       notice.bookId = payload.bookId;
     }
+    if (payload.status !== undefined) {
+      notice.status = payload.status;
+    }
+    if (payload.body !== undefined) {
+      notice.body = payload.body;
+    }
+    if (payload.path !== undefined) {
+      notice.path = payload.path;
+    }
+    if (payload.operation !== undefined) {
+      notice.operation = payload.operation;
+    }
     post(notice);
   }
 
@@ -156,6 +168,12 @@ export function attachSessionWorker(
           return;
         case "steer":
           postResult(data.id, await current.steer(data.note));
+          return;
+        case "cancel":
+          postResult(data.id, await current.cancel());
+          return;
+        case "getRunState":
+          postResult(data.id, await current.getRunState());
           return;
         case "chapterGet":
           postResult(data.id, await current.chapter.get(data.chapter));
