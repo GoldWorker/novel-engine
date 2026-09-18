@@ -26,12 +26,17 @@ export interface FoundationMeta {
   progress: Progress | null;
 }
 
+/** `foundation_audit` vs a missing fingerprint artifact. */
+export type FoundationGapKind = "artifact" | "audit";
+
 /** One missing foundation artifact, aligned with `foundationMissing` keys. */
 export interface FoundationGap {
   key: string;
   path: string;
   requiredFor: string;
   hint: string;
+  /** `audit` when `key` is `foundation_audit`; otherwise `artifact`. */
+  kind: FoundationGapKind;
 }
 
 /** Planning scale used to build the gap table (`inferPlanningStub` / store). */
@@ -49,6 +54,11 @@ export interface InspectResult {
   gaps: FoundationGap[];
   readyToWrite: boolean;
   planning: PlanningInfo;
+  /**
+   * True when `gaps` is non-empty and every gap is `foundation_audit`.
+   * Hosts may then call `startAutoWrite` / `startBook` with `confirmAuditGap: true`.
+   */
+  auditOnly: boolean;
 }
 
 export interface CreateNovelSessionOptions {
@@ -167,6 +177,11 @@ export interface StartAutoWriteOptions {
    * `{ status: "needs_foundation" }` without `Engine.run`.
    */
   requireConfirmGaps?: boolean;
+  /**
+   * When remaining gaps are **only** `foundation_audit`, proceed to `Engine.run`.
+   * Does not skip non-audit gaps (unlike `requireConfirmGaps: false`).
+   */
+  confirmAuditGap?: boolean;
   maxSteps?: number;
 }
 
@@ -174,6 +189,11 @@ export interface AutoWriteNeedsFoundation {
   status: "needs_foundation";
   gaps: FoundationGap[];
   meta: FoundationMeta;
+  /**
+   * True iff every remaining gap is `foundation_audit`. Hosts may retry with
+   * `confirmAuditGap: true` instead of disabling all gap confirms.
+   */
+  auditOnly: boolean;
 }
 
 export interface AutoWriteEngineOutcome {
@@ -211,17 +231,54 @@ export interface ChapterWriteResult {
   turns: number;
 }
 
+export interface ChapterDeleteOptions {
+  /**
+   * When true, rewrite flat `outline` and/or `layeredOutline` without this
+   * chapter row via `upsertFoundation` (whole-file replace, no assess/confirm
+   * gate). Does not renumber remaining chapters. Deleting the last remaining
+   * flat-outline row is unsupported (upsert requires a non-empty array).
+   */
+  syncOutline?: boolean;
+}
+
+export interface ChapterDeleteResult {
+  chapter: number;
+  /** Logical paths that existed and were removed. */
+  removed: string[];
+  /** True when `syncOutline` rewrote at least one outline artifact. */
+  outlineSynced: boolean;
+  progress: Progress | null;
+}
+
 export interface ChapterRunner {
   get(chapter: number): Promise<ChapterView | null>;
   saveFinal(chapter: number, markdown: string): Promise<void>;
   write(input: ChapterWriteInput): Promise<ChapterWriteResult>;
+  delete(chapter: number, options?: ChapterDeleteOptions): Promise<ChapterDeleteResult>;
 }
+
+/** Result of `pause` / `resume` / `steer` while an auto-write Engine may be running. */
+export type BookControlStatus = "ok" | "idle";
+
+export interface BookControlResult {
+  /**
+   * `ok` — forwarded to the Engine held during `startAutoWrite`.
+   * `idle` — no auto-write Engine is running; no-op (not an exception).
+   */
+  status: BookControlStatus;
+}
+
+/** Kit `updateOutline` patch: upsert of outline keys only (no assess/confirm). */
+export type OutlineUpdate = Pick<FoundationPatch, "outline" | "layeredOutline">;
 
 export type SessionEvent =
   | { type: "foundation_updated"; meta: FoundationMeta }
   | { type: "auto_write_step"; step: number; instruction: Instruction }
   | { type: "stopped"; result: AutoWriteResult }
-  | { type: "chapter_step"; chapter: number; mode: ChapterWriteMode; step: number; tool?: string };
+  | { type: "chapter_step"; chapter: number; mode: ChapterWriteMode; step: number; tool?: string }
+  | { type: "paused" }
+  | { type: "resumed" }
+  | { type: "steered"; note: string };
 
 export type SessionUnsubscribe = () => void;
 
@@ -252,6 +309,15 @@ export interface NovelSession {
    */
   applyFoundationChange(options: ApplyFoundationChangeOptions): Promise<ApplyFoundationChangeResult>;
   startAutoWrite(options: StartAutoWriteOptions): Promise<AutoWriteResult>;
+  /**
+   * Cooperative pause of the Engine held during `startAutoWrite`.
+   * Does not take the busy flag. Returns `{ status: "idle" }` when no Engine
+   * is running (including during generateMissing / chapter.write / apply).
+   */
+  pause(): Promise<BookControlResult>;
+  resume(): Promise<BookControlResult>;
+  /** Empty note throws `EngineError`. Idle when no auto-write Engine is running. */
+  steer(note: string): Promise<BookControlResult>;
   subscribe(listener: (event: SessionEvent) => void): SessionUnsubscribe;
   close(): void;
 }

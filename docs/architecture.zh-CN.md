@@ -137,7 +137,7 @@ Worker → 主线程通知：`event` / `snapshot` / `error`。
 
 命令（含增量 S5/S6）：
 
-`inspectFoundation` | `getFoundation` | `getProgress` | `assertReadyToWrite` | `listArtifacts` | `exportSnapshot` | `importSnapshot` | `upsertFoundation` | `generateFoundation` | `assessFoundationImpact` | `applyFoundationChange` | `startAutoWrite` | `chapterGet` | `chapterSaveFinal` | `chapterWrite` | `close`
+`inspectFoundation` | `getFoundation` | `getProgress` | `assertReadyToWrite` | `listArtifacts` | `exportSnapshot` | `importSnapshot` | `upsertFoundation` | `generateFoundation` | `assessFoundationImpact` | `applyFoundationChange` | `startAutoWrite` | `pause` | `resume` | `steer` | `chapterGet` | `chapterSaveFinal` | `chapterWrite` | `chapterDelete` | `close`
 
 通知：`result` | `event` | `error`。
 
@@ -163,7 +163,9 @@ Kit 只是组合 + 默认值。**不**改 Session/Engine 协议。
 
 ## Busy / session 生命周期
 
-`startAutoWrite`、`chapter.write` 与 `applyFoundationChange` 共用一个 session busy 标志。其中一个进行中再调用另一个会抛 `SessionBusyError`（同线程与 Worker 桥均如此）。Worker 侧 busy 意味着进行中的 `applyFoundationChange` / `startAutoWrite` 会挡住跨桥的 `chapter.write`。
+`startAutoWrite`、`chapter.write`、`chapter.delete` 与 `applyFoundationChange` 共用一个 session busy 标志。其中一个进行中再调用另一个会抛 `SessionBusyError`（同线程与 Worker 桥均如此）。Worker 侧 busy 意味着进行中的 `applyFoundationChange` / `startAutoWrite` / `chapter.delete` 会挡住跨桥的 `chapter.write`。
+
+`pause` / `resume` / `steer` **不**占 busy。它们转发到 `startAutoWrite` → `Engine.run` 期间持有的 Engine 实例。没有 Engine 在跑时返回 `{ status: "idle" }`。`generateMissing`（`Engine.run` 之前）期间为 idle。空 steer 笔记抛 `EngineError`。
 
 读取（`getFoundation`、`inspectFoundation`、`assessFoundationImpact`、`chapter.get` …）不占 busy。Session **不缓存**产物——每次都是 store 直读。
 

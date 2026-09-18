@@ -141,11 +141,11 @@ const kit = await NovelKit.create({
   // bookId omitted → "default"
 });
 
-const { gaps, readyToWrite } = await kit.inspect({ prompt: "写一本三章短篇" });
+const { gaps, readyToWrite, auditOnly } = await kit.inspect({ prompt: "写一本三章短篇" });
 await kit.fillFoundation({ book: { title: "无主的信", synopsis: "灯塔与潮" } });
 const outcome = await kit.startBook({
   prompt: "写一本三章短篇：……",
-  generateMissing: true, // may return { status: "needs_foundation", gaps }
+  generateMissing: true, // may return { status: "needs_foundation", gaps, auditOnly }
 });
 
 kit.subscribe((event) => {
@@ -220,9 +220,11 @@ Names map 1:1 onto Session (no second copy of the rules):
 | `fillFoundation` | `upsertFoundation` |
 | `generateFoundation` | `generateFoundation` |
 | `startBook` | `startAutoWrite` |
+| `pauseBook` / `resumeBook` / `steerBook` | `pause` / `resume` / `steer` |
 | `assessFoundation` | `assessFoundationImpact` |
 | `applyFoundation` | `applyFoundationChange` |
-| `getChapter` / `writeChapter` / `saveChapter` | `chapter.get` / `write` / `saveFinal` |
+| `getChapter` / `writeChapter` / `saveChapter` / `deleteChapter` | `chapter.get` / `write` / `saveFinal` / `delete` |
+| `updateOutline` | `upsertFoundation` (outline keys only; no assess/confirm) |
 | `getMeta` / `getProgress` / `listArtifacts` | `getFoundation` / `getProgress` / `listArtifacts` |
 | `createBook` / `switchBook` / `listBooks` | workspace APIs |
 | `exportBook` / `importBook` | `exportSnapshot` / `importSnapshot` |
@@ -237,7 +239,9 @@ Preserved Session behavior:
 - Guard `getProgress()` null before `latestCompleted` / `nextChapter`.
 - No mid-session LLM swap (worker endpoint is fixed at init).
 
-`startBook` may return `{ status: "needs_foundation" }` without `Engine.run` (default `requireConfirmGaps: true`). After book/premise/outline/characters/worldRules exist, the leftover gap is often `foundation_audit` — `generateMissing` cannot fill it (Engine writes the audit). Confirm in the UI, then retry with `requireConfirmGaps: false`.
+`startBook` may return `{ status: "needs_foundation", gaps, meta, auditOnly }` without `Engine.run` (default `requireConfirmGaps: true`). After book/premise/outline/characters/worldRules exist, the leftover gap is often `foundation_audit` (`auditOnly: true`) — `generateMissing` cannot fill it (Engine writes the audit). Confirm in the UI, then retry with **`confirmAuditGap: true`**. That does **not** skip non-audit gaps (unlike `requireConfirmGaps: false`).
+
+While `startBook` is in flight, `pauseBook` / `resumeBook` / `steerBook(message)` forward to the Engine instance held during that run (same on `runtime: "worker"`). When nothing is running they return `{ status: "idle" }` (no-op, not an exception). They do **not** take the busy flag. Empty steer notes throw `EngineError`. `subscribe` emits `paused` / `resumed` / `steered` from that Engine.
 
 When `workspace: false` (or a custom `StorePort`), multi-book methods throw a clear `KitWorkspaceDisabledError`.
 
@@ -616,7 +620,7 @@ const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "写一
 
 ### 7.1 Inspect gaps before auto-write
 
-Keep `requireConfirmGaps: true` (default). If anything is missing, `startAutoWrite` returns early with `needs_foundation` and does **not** run the Engine — use `gaps[].hint` in the UI.
+Keep `requireConfirmGaps: true` (default). If anything is missing, `startAutoWrite` returns early with `needs_foundation` and does **not** run the Engine — use `gaps[].hint` and `auditOnly` in the UI.
 
 ```ts
 const outcome = await session.startAutoWrite({
@@ -625,8 +629,16 @@ const outcome = await session.startAutoWrite({
 });
 
 if (outcome.status === "needs_foundation") {
+  if (outcome.auditOnly) {
+    // host confirmed: leftover is only foundation_audit
+    await session.startAutoWrite({
+      prompt: "写一本三章短篇：……",
+      confirmAuditGap: true,
+    });
+    return;
+  }
   for (const gap of outcome.gaps) {
-    // gap.key / gap.path / gap.hint — e.g. book, premise, outline, characters…
+    // gap.key / gap.kind / gap.path / gap.hint — e.g. book, premise, outline, characters…
   }
   return;
 }
@@ -661,6 +673,7 @@ await session.startAutoWrite({
   foundation: { book: { title: "无主的信", synopsis: "……" } }, // upsert first
   generateMissing: true, // then generate remaining gaps
   requireConfirmGaps: true, // still return needs_foundation if anything left
+  // if leftover is only foundation_audit: confirmAuditGap: true
 });
 ```
 
@@ -852,6 +865,10 @@ await session.chapter.write({
 });
 
 await session.chapter.saveFinal(1, "# 风暴之后\n\n……");
+
+await session.chapter.delete(1, { syncOutline: true });
+// Kit: await kit.deleteChapter(1, { syncOutline: true })
+// Optional TOC helper (upsert, no assess/confirm): await kit.updateOutline({ outline })
 ```
 
 <a id="scenario-session-read"></a>

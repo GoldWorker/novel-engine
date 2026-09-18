@@ -1,5 +1,11 @@
 import type { Progress } from "../domain/progress.js";
-import { createEngine, type EngineDeps, type EngineLoopEvent } from "../engine/index.js";
+import {
+  createEngine,
+  EngineError,
+  type Engine,
+  type EngineDeps,
+  type EngineLoopEvent,
+} from "../engine/index.js";
 import type { LlmPort } from "../ports/llm.js";
 import type { StorePort } from "../ports/store.js";
 import type {
@@ -23,7 +29,7 @@ import {
   SessionLlmRequiredError,
 } from "./errors.js";
 import { writeFoundationPatch } from "./foundation-write.js";
-import { gapsFromMissing } from "./gaps.js";
+import { gapsFromMissing, isAuditOnlyGaps } from "./gaps.js";
 import {
   assertFoundationKeys,
   completeFoundationJson,
@@ -44,6 +50,7 @@ import type {
   ApplyFoundationChangeResult,
   AssessFoundationImpactOptions,
   AutoWriteResult,
+  BookControlResult,
   ChapterRunner,
   ChapterWriteResult,
   CreateNovelSessionOptions,
@@ -69,6 +76,8 @@ export class NovelSessionImpl implements NovelSession {
   readonly chapter: ChapterRunner;
   private closed = false;
   private busy = false;
+  /** Engine instance held only while `startAutoWrite` → `Engine.run` is in flight. */
+  private runningEngine: Engine | null = null;
   private readonly listeners = new Set<(event: SessionEvent) => void>();
 
   constructor(options: CreateNovelSessionOptions) {
@@ -81,6 +90,7 @@ export class NovelSessionImpl implements NovelSession {
       requireLlm: () => this.requireLlm(),
       withBusy: (fn) => this.withBusy(fn),
       emit: (event) => this.emit(event),
+      upsertFoundation: (patch) => this.upsertFoundation(patch),
     });
   }
 
@@ -121,6 +131,7 @@ export class NovelSessionImpl implements NovelSession {
       gaps,
       readyToWrite: gaps.length === 0,
       planning,
+      auditOnly: isAuditOnlyGaps(gaps),
     };
   }
 
@@ -202,6 +213,40 @@ export class NovelSessionImpl implements NovelSession {
     return this.withBusy(() => this.runAutoWrite(options));
   }
 
+  async pause(): Promise<BookControlResult> {
+    this.assertOpen();
+    const engine = this.runningEngine;
+    if (!engine) {
+      return { status: "idle" };
+    }
+    engine.pause();
+    return { status: "ok" };
+  }
+
+  async resume(): Promise<BookControlResult> {
+    this.assertOpen();
+    const engine = this.runningEngine;
+    if (!engine) {
+      return { status: "idle" };
+    }
+    await engine.resume();
+    return { status: "ok" };
+  }
+
+  async steer(note: string): Promise<BookControlResult> {
+    this.assertOpen();
+    const trimmed = note.trim();
+    if (trimmed === "") {
+      throw new EngineError("steer note must be non-empty");
+    }
+    const engine = this.runningEngine;
+    if (!engine) {
+      return { status: "idle" };
+    }
+    await engine.steer(trimmed);
+    return { status: "ok" };
+  }
+
   private async runApplyFoundationChange(
     options: ApplyFoundationChangeOptions,
   ): Promise<ApplyFoundationChangeResult> {
@@ -271,11 +316,14 @@ export class NovelSessionImpl implements NovelSession {
 
     const inspected = await this.inspectFoundation({ prompt: options.prompt });
     const requireConfirm = options.requireConfirmGaps !== false;
-    if (requireConfirm && inspected.gaps.length > 0) {
+    const auditOnly = isAuditOnlyGaps(inspected.gaps);
+    const proceedDespiteAudit = auditOnly && options.confirmAuditGap === true;
+    if (requireConfirm && inspected.gaps.length > 0 && !proceedDespiteAudit) {
       const result: AutoWriteResult = {
         status: "needs_foundation",
         gaps: inspected.gaps,
         meta: inspected.meta,
+        auditOnly,
       };
       this.emit({ type: "stopped", result });
       return result;
@@ -295,12 +343,17 @@ export class NovelSessionImpl implements NovelSession {
     if (options.maxSteps !== undefined) {
       runInput.maxSteps = options.maxSteps;
     }
-    const engineResult = await engine.run(runInput);
-    const meta = await this.readFoundation();
-    const status = engineResult.stoppedReason === "complete" ? "completed" : "stopped";
-    const result: AutoWriteResult = { status, result: engineResult, meta };
-    this.emit({ type: "stopped", result });
-    return result;
+    this.runningEngine = engine;
+    try {
+      const engineResult = await engine.run(runInput);
+      const meta = await this.readFoundation();
+      const status = engineResult.stoppedReason === "complete" ? "completed" : "stopped";
+      const result: AutoWriteResult = { status, result: engineResult, meta };
+      this.emit({ type: "stopped", result });
+      return result;
+    } finally {
+      this.runningEngine = null;
+    }
   }
 
   private async withBusy<T>(fn: () => Promise<T>): Promise<T> {
@@ -322,6 +375,18 @@ export class NovelSessionImpl implements NovelSession {
         step: event.step,
         instruction: event.instruction,
       });
+      return;
+    }
+    if (event.type === "paused") {
+      this.emit({ type: "paused" });
+      return;
+    }
+    if (event.type === "resumed") {
+      this.emit({ type: "resumed" });
+      return;
+    }
+    if (event.type === "steered") {
+      this.emit({ type: "steered", note: event.note });
     }
   };
 

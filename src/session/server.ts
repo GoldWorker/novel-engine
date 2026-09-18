@@ -148,6 +148,15 @@ export function attachSessionWorker(
         case "startAutoWrite":
           postResult(data.id, await current.startAutoWrite(data.options));
           return;
+        case "pause":
+          postResult(data.id, await current.pause());
+          return;
+        case "resume":
+          postResult(data.id, await current.resume());
+          return;
+        case "steer":
+          postResult(data.id, await current.steer(data.note));
+          return;
         case "chapterGet":
           postResult(data.id, await current.chapter.get(data.chapter));
           return;
@@ -157,6 +166,12 @@ export function attachSessionWorker(
           return;
         case "chapterWrite":
           postResult(data.id, await current.chapter.write(data.input));
+          return;
+        case "chapterDelete":
+          postResult(
+            data.id,
+            await current.chapter.delete(data.chapter, data.options ?? {}),
+          );
           return;
       }
     } catch (err) {

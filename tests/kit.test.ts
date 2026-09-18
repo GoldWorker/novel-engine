@@ -3,7 +3,6 @@ import shortBook from "../fixtures/short-book.json" with { type: "json" };
 import { MemoryStore, MockLlm } from "../src/index.js";
 import {
   FoundationIncompleteError,
-  type FoundationPatch,
 } from "../src/session/index.js";
 import {
   KitClosedError,
@@ -11,6 +10,7 @@ import {
   KitWorkerError,
   KitWorkspaceDisabledError,
   NovelKit,
+  type FoundationPatch,
 } from "../src/kit/index.js";
 import type { ShortBookFixture } from "./helpers/short-book-llm.js";
 
@@ -136,7 +136,55 @@ describe("NovelKit.create (runtime: main, store: memory)", () => {
       throw new Error("expected needs_foundation");
     }
     expect(result.gaps.map((gap) => gap.key)).toContain("book");
+    expect(result.auditOnly).toBe(false);
     expect(llm.callCount).toBe(0);
+    expect(await kit.pauseBook()).toEqual({ status: "idle" });
+    kit.dispose();
+  });
+
+  it("startBook confirmAuditGap when leftover is audit-only; deleteChapter + updateOutline", async () => {
+    const kit = await NovelKit.create({
+      runtime: "main",
+      store: "memory",
+      llm: unusedLlm(),
+      bookId: "letter",
+      workspace: false,
+    });
+    await kit.fillFoundation({
+      book: short.book,
+      premise: short.premise,
+      outline: short.outline,
+      characters: short.characters,
+      worldRules: short.world_rules,
+    });
+    const inspected = await kit.inspect({ prompt: short.prompt });
+    expect(inspected.auditOnly).toBe(true);
+    const blocked = await kit.startBook({ prompt: short.prompt });
+    expect(blocked.status).toBe("needs_foundation");
+    if (blocked.status !== "needs_foundation") {
+      throw new Error("expected needs_foundation");
+    }
+    expect(blocked.auditOnly).toBe(true);
+
+    const chapter1 = short.chapters["1"];
+    if (!chapter1) {
+      throw new Error("missing fixture chapter 1");
+    }
+    await kit.saveChapter(1, chapter1.content);
+    const deleted = await kit.deleteChapter(1, { syncOutline: true });
+    expect(deleted.removed).toContain("chapters/01.md");
+    expect(deleted.outlineSynced).toBe(true);
+    expect((await kit.getChapter(1))?.final).toBeUndefined();
+    expect((await kit.getMeta()).outline?.map((row) => row.chapter)).toEqual([2, 3]);
+
+    const meta = await kit.updateOutline({
+      outline: [
+        { chapter: 1, title: "风暴之后", summary: "捡到信。" },
+        { chapter: 2, title: "岸边的地址", summary: "空屋。" },
+      ],
+    });
+    expect(meta.outline?.map((row) => row.chapter)).toEqual([1, 2]);
+    await expect(kit.updateOutline({})).rejects.toThrow(/outline/);
     kit.dispose();
   });
 

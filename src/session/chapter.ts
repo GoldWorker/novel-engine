@@ -1,10 +1,13 @@
 import type { Progress } from "../domain/progress.js";
+import { latestCompleted } from "../domain/progress.js";
 import type { LlmMessage, LlmPort, LlmToolCall } from "../ports/llm.js";
 import type { StorePort } from "../ports/store.js";
-import type { ChapterPlan, ChapterSummary } from "../store/artifacts.js";
+import type { ChapterPlan, ChapterSummary, OutlineEntry, VolumeOutline } from "../store/artifacts.js";
 import { appendCheckpoint } from "../store/audit.js";
 import { readJson, readText, writeJson, writeText } from "../store/io.js";
+import { loadLayeredOutline } from "../store/layered.js";
 import {
+  PATHS,
   chapterDraftPath,
   chapterFinalPath,
   chapterPlanPath,
@@ -12,12 +15,17 @@ import {
 } from "../store/paths.js";
 import { writerTools } from "../workers/tools.js";
 import { ChapterConflictError, ChapterRunnerError } from "./errors.js";
+import { removeStorePath } from "./foundation-write.js";
 import type {
+  ChapterDeleteOptions,
+  ChapterDeleteResult,
   ChapterRunner,
   ChapterView,
   ChapterWriteInput,
   ChapterWriteMode,
   ChapterWriteResult,
+  FoundationMeta,
+  FoundationPatch,
   SessionEvent,
 } from "./types.js";
 import { CHAPTER_WRITE_MODES } from "./types.js";
@@ -156,6 +164,7 @@ export function createChapterRunner(hooks: {
   requireLlm: () => LlmPort;
   withBusy: <T>(fn: () => Promise<T>) => Promise<T>;
   emit: (event: SessionEvent) => void;
+  upsertFoundation: (patch: FoundationPatch) => Promise<FoundationMeta>;
 }): ChapterRunner {
   return {
     async get(chapter: number): Promise<ChapterView | null> {
@@ -170,6 +179,15 @@ export function createChapterRunner(hooks: {
       hooks.requireOpen();
       const llm = hooks.requireLlm();
       return hooks.withBusy(() => runChapterWrite(hooks.store, llm, input, hooks.emit));
+    },
+    async delete(
+      chapter: number,
+      options: ChapterDeleteOptions = {},
+    ): Promise<ChapterDeleteResult> {
+      hooks.requireOpen();
+      return hooks.withBusy(() =>
+        deleteChapter(hooks.store, chapter, options, hooks.upsertFoundation),
+      );
     },
   };
 }
@@ -276,4 +294,113 @@ export async function ensureWritingProgress(store: StorePort, chapter: number): 
       currentChapter: Math.max(progress.currentChapter ?? 0, chapter),
     });
   }
+}
+
+const CHAPTER_ARTIFACT_PATHS = [
+  chapterPlanPath,
+  chapterDraftPath,
+  chapterFinalPath,
+  chapterSummaryPath,
+] as const;
+
+export async function deleteChapter(
+  store: StorePort,
+  chapter: number,
+  options: ChapterDeleteOptions,
+  upsertFoundation: (patch: FoundationPatch) => Promise<FoundationMeta>,
+): Promise<ChapterDeleteResult> {
+  assertChapterNumber(chapter);
+  const removed: string[] = [];
+  for (const pathOf of CHAPTER_ARTIFACT_PATHS) {
+    const path = pathOf(chapter);
+    if (await store.has(path)) {
+      await removeStorePath(store, path);
+      if (!(await store.has(path))) {
+        removed.push(path);
+      }
+    }
+  }
+
+  await dropChapterFromProgress(store, chapter);
+
+  let outlineSynced = false;
+  if (options.syncOutline === true) {
+    const patch = await outlinePatchWithoutChapter(store, chapter);
+    if (patch !== null) {
+      await upsertFoundation(patch);
+      outlineSynced = true;
+    }
+  }
+
+  return {
+    chapter,
+    removed,
+    outlineSynced,
+    progress: await store.loadProgress(),
+  };
+}
+
+async function dropChapterFromProgress(store: StorePort, chapter: number): Promise<void> {
+  const progress = await store.loadProgress();
+  if (progress == null) {
+    return;
+  }
+  const completed = progress.completedChapters.filter((n) => n !== chapter);
+  const pendingRewrites = progress.pendingRewrites.filter((n) => n !== chapter);
+  const wasCompleted = completed.length !== progress.completedChapters.length;
+  let currentChapter = progress.currentChapter;
+  if (currentChapter === chapter) {
+    currentChapter = latestCompleted({ ...progress, completedChapters: completed });
+  }
+  let phase = progress.phase;
+  if (phase === "complete" && wasCompleted) {
+    phase = "writing";
+  }
+  const next: Progress = {
+    ...progress,
+    phase,
+    completedChapters: completed,
+    pendingRewrites,
+  };
+  if (currentChapter !== undefined) {
+    next.currentChapter = currentChapter;
+  }
+  await store.saveProgress(next);
+}
+
+/**
+ * Build an upsert patch that drops `chapter` from flat and/or layered outline.
+ * Returns null when nothing can be rewritten (no files, unchanged, or remaining
+ * flat outline would be empty — upsert forbids empty arrays).
+ */
+async function outlinePatchWithoutChapter(
+  store: StorePort,
+  chapter: number,
+): Promise<FoundationPatch | null> {
+  const patch: FoundationPatch = {};
+  const outline = await readJson<OutlineEntry[]>(store, PATHS.outline);
+  if (Array.isArray(outline) && outline.some((entry) => entry.chapter === chapter)) {
+    const next = outline.filter((entry) => entry.chapter !== chapter);
+    if (next.length > 0) {
+      patch.outline = next;
+    }
+  }
+  const layered = await loadLayeredOutline(store);
+  if (layered && layered.some((volume) => volumeHasChapter(volume, chapter))) {
+    patch.layeredOutline = layered.map((volume) => ({
+      ...volume,
+      arcs: volume.arcs.map((arc) => ({
+        ...arc,
+        chapters: arc.chapters.filter((entry) => entry.chapter !== chapter),
+      })),
+    }));
+  }
+  if (patch.outline === undefined && patch.layeredOutline === undefined) {
+    return null;
+  }
+  return patch;
+}
+
+function volumeHasChapter(volume: VolumeOutline, chapter: number): boolean {
+  return volume.arcs.some((arc) => arc.chapters.some((entry) => entry.chapter === chapter));
 }

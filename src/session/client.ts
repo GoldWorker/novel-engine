@@ -14,6 +14,9 @@ import type {
   ApplyFoundationChangeResult,
   AssessFoundationImpactOptions,
   AutoWriteResult,
+  BookControlResult,
+  ChapterDeleteOptions,
+  ChapterDeleteResult,
   ChapterRunner,
   ChapterView,
   ChapterWriteInput,
@@ -140,6 +143,13 @@ export function createSessionClient(
     write(input: ChapterWriteInput): Promise<ChapterWriteResult> {
       return rpc({ ...envelope(), type: "chapterWrite", input });
     },
+    delete(chapterNumber: number, options: ChapterDeleteOptions = {}): Promise<ChapterDeleteResult> {
+      const command = { ...envelope(), type: "chapterDelete" as const, chapter: chapterNumber };
+      if (options.syncOutline !== undefined) {
+        return rpc({ ...command, options: { syncOutline: options.syncOutline } });
+      }
+      return rpc(command);
+    },
   };
 
   const client: SessionClient = {
@@ -201,6 +211,15 @@ export function createSessionClient(
     },
     startAutoWrite(writeOpts: StartAutoWriteOptions): Promise<AutoWriteResult> {
       return rpc({ ...envelope(), type: "startAutoWrite", options: writeOpts });
+    },
+    pause(): Promise<BookControlResult> {
+      return rpc({ ...envelope(), type: "pause" });
+    },
+    resume(): Promise<BookControlResult> {
+      return rpc({ ...envelope(), type: "resume" });
+    },
+    steer(note: string): Promise<BookControlResult> {
+      return rpc({ ...envelope(), type: "steer", note });
     },
     subscribe(listener: (event: SessionEvent) => void): SessionUnsubscribe {
       if (closed) {

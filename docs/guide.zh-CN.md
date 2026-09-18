@@ -141,11 +141,11 @@ const kit = await NovelKit.create({
   // 省略 bookId → "default"
 });
 
-const { gaps, readyToWrite } = await kit.inspect({ prompt: "写一本三章短篇" });
+const { gaps, readyToWrite, auditOnly } = await kit.inspect({ prompt: "写一本三章短篇" });
 await kit.fillFoundation({ book: { title: "无主的信", synopsis: "灯塔与潮" } });
 const outcome = await kit.startBook({
   prompt: "写一本三章短篇：……",
-  generateMissing: true, // 可能返回 { status: "needs_foundation", gaps }
+  generateMissing: true, // 可能返回 { status: "needs_foundation", gaps, auditOnly }
 });
 
 kit.subscribe((event) => {
@@ -220,9 +220,11 @@ create 时，主线程先发 **init**（`ns: "kit"`），带上 `llmEndpoint`、
 | `fillFoundation` | `upsertFoundation` |
 | `generateFoundation` | `generateFoundation` |
 | `startBook` | `startAutoWrite` |
+| `pauseBook` / `resumeBook` / `steerBook` | `pause` / `resume` / `steer` |
 | `assessFoundation` | `assessFoundationImpact` |
 | `applyFoundation` | `applyFoundationChange` |
-| `getChapter` / `writeChapter` / `saveChapter` | `chapter.get` / `write` / `saveFinal` |
+| `getChapter` / `writeChapter` / `saveChapter` / `deleteChapter` | `chapter.get` / `write` / `saveFinal` / `delete` |
+| `updateOutline` | `upsertFoundation`（仅大纲键；无评估/确认） |
 | `getMeta` / `getProgress` / `listArtifacts` | `getFoundation` / `getProgress` / `listArtifacts` |
 | `createBook` / `switchBook` / `listBooks` | 工作区 API |
 | `exportBook` / `importBook` | `exportSnapshot` / `importSnapshot` |
@@ -237,7 +239,9 @@ create 时，主线程先发 **init**（`ns: "kit"`），带上 `llmEndpoint`、
 - 调用 `latestCompleted` / `nextChapter` 前先判断 `getProgress()` 是否为 null。
 - 会话中途不换 LLM（Worker 的 endpoint 在 init 时定死）。
 
-`startBook` 在默认 `requireConfirmGaps: true` 时，可能返回 `{ status: "needs_foundation" }` 而不跑 `Engine.run`。book/premise/outline/characters/worldRules 都齐之后，剩下的缺口常常是 `foundation_audit`——`generateMissing` 填不了它（由 Engine 写审查）。UI 确认后再用 `requireConfirmGaps: false` 重试。
+`startBook` 在默认 `requireConfirmGaps: true` 时，可能返回 `{ status: "needs_foundation", gaps, meta, auditOnly }` 而不跑 `Engine.run`。book/premise/outline/characters/worldRules 都齐之后，剩下的缺口常常是 `foundation_audit`（`auditOnly: true`）——`generateMissing` 填不了它（由 Engine 写审查）。UI 确认后再用 **`confirmAuditGap: true`** 重试。这**不会**跳过非审查缺口（不像 `requireConfirmGaps: false`）。
+
+`startBook` 进行中时，`pauseBook` / `resumeBook` / `steerBook(message)` 转发到这次运行持有的 Engine 实例（`runtime: "worker"` 同样）。没有在跑时返回 `{ status: "idle" }`（空操作，不是异常）。它们**不**占 busy。空 steer 笔记抛 `EngineError`。`subscribe` 会从该 Engine 发出 `paused` / `resumed` / `steered`。
 
 `workspace: false`（或自定义 `StorePort`）时，多书方法会抛出明确的 `KitWorkspaceDisabledError`。
 
@@ -616,7 +620,7 @@ const { gaps, readyToWrite } = await session.inspectFoundation({ prompt: "写一
 
 ### 7.1 自动写作前检查缺口
 
-保持 `requireConfirmGaps: true`（默认）。若仍有缺口，`startAutoWrite` 提前返回 `needs_foundation`，**不**跑 Engine——用 `gaps[].hint` 提示 UI。
+保持 `requireConfirmGaps: true`（默认）。若仍有缺口，`startAutoWrite` 提前返回 `needs_foundation`，**不**跑 Engine——用 `gaps[].hint` 和 `auditOnly` 提示 UI。
 
 ```ts
 const outcome = await session.startAutoWrite({
@@ -625,8 +629,16 @@ const outcome = await session.startAutoWrite({
 });
 
 if (outcome.status === "needs_foundation") {
+  if (outcome.auditOnly) {
+    // 宿主确认：剩下的只有 foundation_audit
+    await session.startAutoWrite({
+      prompt: "写一本三章短篇：……",
+      confirmAuditGap: true,
+    });
+    return;
+  }
   for (const gap of outcome.gaps) {
-    // gap.key / gap.path / gap.hint — 如 book, premise, outline, characters…
+    // gap.key / gap.kind / gap.path / gap.hint — 如 book, premise, outline, characters…
   }
   return;
 }
@@ -661,6 +673,7 @@ await session.startAutoWrite({
   foundation: { book: { title: "无主的信", synopsis: "……" } }, // 先 upsert
   generateMissing: true, // 再对剩余缺口 generate
   requireConfirmGaps: true, // 仍缺则返回 needs_foundation
+  // 若只剩 foundation_audit：confirmAuditGap: true
 });
 ```
 
@@ -852,6 +865,10 @@ await session.chapter.write({
 });
 
 await session.chapter.saveFinal(1, "# 风暴之后\n\n……");
+
+await session.chapter.delete(1, { syncOutline: true });
+// Kit：await kit.deleteChapter(1, { syncOutline: true })
+// 可选 TOC 助手（upsert，无评估/确认）：await kit.updateOutline({ outline })
 ```
 
 <a id="scenario-session-read"></a>

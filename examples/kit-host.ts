@@ -29,10 +29,22 @@ export async function demoKitNode(): Promise<void> {
     bookId: "letter",
   });
   await kit.fillFoundation({ book: { title: "无主的信", synopsis: "灯塔与潮" } });
-  const outcome = await kit.startBook({
+  let outcome = await kit.startBook({
     prompt: "写一本三章短篇：……",
     generateMissing: true,
   });
+  if (outcome.status === "needs_foundation" && outcome.auditOnly) {
+    outcome = await kit.startBook({
+      prompt: "写一本三章短篇：……",
+      confirmAuditGap: true,
+    });
+  }
   console.log(outcome.status);
+  kit.subscribe((event) => {
+    if (event.type === "paused" || event.type === "resumed" || event.type === "steered") {
+      console.log(event.type);
+    }
+  });
+  await kit.pauseBook(); // { status: "idle" } when startBook is not running
   kit.dispose();
 }
