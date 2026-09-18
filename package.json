@@ -1,6 +1,6 @@
 {
   "name": "novel-engine",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Pure-frontend TypeScript Novel Engine SDK (Ports & Adapters). Optional novel-engine/kit façade (OPFS + shipped Worker by default), Engine, route, MemoryStore, OpfsStore, Worker host, book snapshot zip, optional fetch LLM adapters, and a same-thread host session.",
   "license": "Apache-2.0",
   "type": "module",

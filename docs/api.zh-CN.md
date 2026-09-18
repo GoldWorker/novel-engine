@@ -171,7 +171,7 @@ S1–S3 仍在**同线程** `NovelSession`（事实来源）。**S4** 是对该�
 | `ChapterRunner` / `ChapterView` / `ChapterWriteInput` / `ChapterWriteResult` / `ChapterWriteMode` / `CHAPTER_WRITE_MODES` | type / const | S3 ChapterRunner。模式：`create` / `continue` / `rewrite` / `polish`。 |
 | `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`。 |
 | `SessionLlmRequiredError` / `FoundationGenerateError` | class | 缺少 `llm`；非法 generate JSON / keys。 |
-| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` / `applyFoundationChange` 已在进行中（含跨 Worker 桥）。 |
+| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` / `chapter.delete` / `applyFoundationChange` 已在进行中（含跨 Worker 桥）。 |
 | `ChapterConflictError` / `ChapterRunnerError` | class | 章节模式前置失败；作者循环 / `saveFinal` 失败。 |
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | 已关闭的 session/工作区；未知 `bookId`。 |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`。 |
@@ -207,7 +207,7 @@ S1 里 `llm` 对只读检查 / S5 启发式可选。**S2** 的 `generateFoundati
 | `bookId` | 宿主分配的 id。 |
 | `getFoundation()` | `{ book, premise, outline, layeredOutline, characters, worldRules, audit, progress }` — 缺文件对应字段为 `null`。 |
 | `getProgress()` | `store.loadProgress()`。可能为 `null`（还没有 `meta/progress.json`）。 |
-| `inspectFoundation({ prompt? })` | `{ meta, gaps, readyToWrite, planning }`。`prompt`（或 `run_meta` / progress）决定缺口表的规划档。 |
+| `inspectFoundation({ prompt? })` | `{ meta, gaps, readyToWrite, planning, auditOnly }`。`prompt`（或 `run_meta` / progress）决定缺口表的规划档。 |
 | `assertReadyToWrite({ prompt? })` | 未就绪时抛 `FoundationIncompleteError`（带 `.gaps`）。 |
 | `listArtifacts(prefix?)` | `listStorePaths`。 |
 | `exportSnapshot()` / `importSnapshot(bytes)` | 现有书稿快照 API 的薄封装。 |
@@ -215,9 +215,10 @@ S1 里 `llm` 对只读检查 / S5 启发式可选。**S2** 的 `generateFoundati
 | `generateFoundation({ prompt, keys, mode? })` | 结构化一次性 `LlmPort.complete`；从 `text` 解析 JSON；再 `upsertFoundation`。**不是** Engine 循环。 |
 | `assessFoundationImpact(patch, { refineWithLlm? })` | S5：对**拟议**补丁做规则优先影响评估。可选 LLM JSON 精炼。**不写盘**。 |
 | `applyFoundationChange({ patch, confirmRewrite?, rewriteChapters?, … })` | S6：评估 → 确认闸门 → upsert → 可选顺序 `chapter.write`。 |
-| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | 可选 upsert/generate，然后要么 `{ status: "needs_foundation" }`，要么 `createEngine(...).run`。与 `chapter.write` / `applyFoundationChange` 互斥（`SessionBusyError`）。 |
-| `chapter` | S3 ChapterRunner：`get` / `saveFinal` / `write`。同线程；不是 Engine 全书 Route。 |
-| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`。返回取消订阅函数。 |
+| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps? })` | 可选 upsert/generate，然后要么 `{ status: "needs_foundation", gaps, meta, auditOnly }`，要么 `createEngine(...).run`。与 `chapter.write` / `chapter.delete` / `applyFoundationChange` 互斥（`SessionBusyError`）。 |
+| `pause()` / `resume()` / `steer(note)` | 转发到 `startAutoWrite` 期间持有的 Engine。`{ status: "ok" \| "idle" }`。没有 Engine 在跑则为 `idle`（空操作）。空 steer 抛 `EngineError`。**不**占 busy。 |
+| `chapter` | S3 ChapterRunner：`get` / `saveFinal` / `write` / `delete`。同线程；不是 Engine 全书 Route。 |
+| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped` / `paused` / `resumed` / `steered`。返回取消订阅函数。 |
 | `close()` | 再调会抛 `SessionClosedError`。 |
 
 **S4 不含：** Worker 上的 `NovelWorkspace`（工作区留在 UI 线程，每本书一个 session Worker）。
@@ -232,6 +233,7 @@ interface FoundationGap {
   path: string;         // 逻辑 store 路径
   requiredFor: string;  // "write" | "short" | "mid" | "long"
   hint: string;         // 中文 + 短英文
+  kind: "artifact" | "audit";
 }
 ```
 
@@ -260,12 +262,14 @@ interface FoundationGap {
 1. 可选 `foundation` → `upsertFoundation`
 2. 可选 `generateMissing: true` → `generateFoundation({ prompt, keys: missing, mode: "fill_missing" })`
 3. `inspectFoundation({ prompt })`
-4. 若 `requireConfirmGaps !== false`（默认 **true**）且 `gaps.length > 0` → `{ status: "needs_foundation", gaps, meta }`，**不**跑 `Engine.run`
-5. 若已就绪（或关掉确认）→ `createEngine({ store, llm }).run({ prompt, maxSteps })` → `{ status: "completed" | "stopped", result, meta }`（`stoppedReason === "complete"` 时为 `completed`）
+4. 若 `requireConfirmGaps !== false`（默认 **true**）且 `gaps.length > 0`：
+   - 剩下的缺口**只有** `foundation_audit` **且** `confirmAuditGap: true` → 进入 Engine
+   - 否则 → `{ status: "needs_foundation", gaps, meta, auditOnly }`，**不**跑 `Engine.run`
+5. 若已就绪（或关掉确认 / 已确认审查）→ `createEngine({ store, llm }).run({ prompt, maxSteps })` → `{ status: "completed" | "stopped", result, meta }`（`stoppedReason === "complete"` 时为 `completed`）
 
-`subscribe` 在 upsert 后发 `foundation_updated`，Engine 每步发 `auto_write_step`，`chapter.write` 期间发 `chapter_step`，needs-foundation 与 Engine 结束都发 `stopped`。
+`subscribe` 在 upsert 后发 `foundation_updated`，Engine 每步发 `auto_write_step`，持有的 Engine 发 `paused` / `resumed` / `steered`，`chapter.write` 期间发 `chapter_step`，needs-foundation 与 Engine 结束都发 `stopped`。
 
-`startAutoWrite`、`chapter.write` 与 `applyFoundationChange` 共用 busy 标志：其中一个进行中再调用另一个（或自己）会抛 `SessionBusyError`。见 [架构](architecture.zh-CN.md#busy--session-生命周期)。
+`startAutoWrite`、`chapter.write`、`chapter.delete` 与 `applyFoundationChange` 共用 busy 标志：其中一个进行中再调用另一个（或自己）会抛 `SessionBusyError`。`pause` / `resume` / `steer` **不**占该标志（只在 `Engine.run` 已开始后生效）。见 [架构](architecture.zh-CN.md#busy--session-生命周期)。
 
 ### S1 — `NovelWorkspace`
 
@@ -290,6 +294,7 @@ interface FoundationGap {
 | `chapter.get(n)` | 从 `drafts/NN.*`、`chapters/NN.md`、`summaries/NN.json` 读 `{ chapter, plan, draft, final, summary }`。全无则 `null`。 |
 | `chapter.saveFinal(n, markdown)` | 写 `chapters/NN.md`，更新 `progress.completedChapters` / checkpoint。不调 LLM。 |
 | `chapter.write({ chapter, mode, instruction?, title?, force? })` | 在 `LlmPort` + 现有作者工具上的专用循环。需要 `llm`。 |
+| `chapter.delete(n, { syncOutline? })` | 删除 plan/draft/final/summary。从 `completedChapters` / `pendingRewrites` 去掉 `n`；钳制 `currentChapter`；若删掉已完成章且 `phase === "complete"` 则回到 `writing`。`totalChapters` 不变。`syncOutline` 会 upsert 去掉该行的大纲（不重编号；扁平大纲最后一行不受支持）。占 busy。审阅文件（`reviews/*`）留着。 |
 
 #### 模式
 
@@ -316,11 +321,11 @@ MockLlm：脚本 `toolCalls`（与 S2 的 `generateFoundation` 用 `text` 里的
 | --- | --- |
 | `attachSessionWorker(port, { createSession })` | Worker 适配器。`createSession` 注入 `StorePort` + `LlmPort` 并返回 `createNovelSession(...)`。 |
 | `createSessionClient(port, { bookId })` | 主线程 `NovelSession`。`bookId` 必须与 Worker session 一致。 |
-| 协议 | `SESSION_PROTOCOL === 1`，`ns: "session"`。命令：`inspectFoundation` / `getFoundation` / `getProgress` / `assertReadyToWrite` / `listArtifacts` / `exportSnapshot` / `importSnapshot` / `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `chapterGet` / `chapterSaveFinal` / `chapterWrite` / `close`。通知：`result` / `event` / `error`。 |
-| Busy | Worker 侧 `SessionBusyError`：`startAutoWrite` / `applyFoundationChange` 进行中会挡住跨桥的 `chapter.write`。 |
+| 协议 | `SESSION_PROTOCOL === 1`，`ns: "session"`。命令：`inspectFoundation` / `getFoundation` / `getProgress` / `assertReadyToWrite` / `listArtifacts` / `exportSnapshot` / `importSnapshot` / `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `pause` / `resume` / `steer` / `chapterGet` / `chapterSaveFinal` / `chapterWrite` / `chapterDelete` / `close`。通知：`result` / `event` / `error`。 |
+| Busy | Worker 侧 `SessionBusyError`：`startAutoWrite` / `applyFoundationChange` / `chapter.delete` 进行中会挡住跨桥的 `chapter.write`。`pause` / `resume` / `steer` 在 `startAutoWrite` 期间允许。 |
 | `generateFoundation` / S5–S6 | **在 Worker 里跑**（书的 `StorePort` 在那边）。 |
 | `LlmPort` | `fetch` 宿主 BFF。**不要把供应商 API Key 打进公开 Worker 包**。 |
-| 事件 | Worker 转发 `subscribe` 事件（`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`）。 |
+| 事件 | Worker 转发 `subscribe` 事件（`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped` / `paused` / `resumed` / `steered`）。 |
 
 ### S5 — `assessFoundationImpact`
 
@@ -366,7 +371,7 @@ MockLlm：脚本 `toolCalls`（与 S2 的 `generateFoundation` 用 `text` 里的
 | `FoundationIncompleteError` | `assertReadyToWrite` — `.gaps` 即检查表。 |
 | `SessionLlmRequiredError` | `generateFoundation` / Engine 版 `startAutoWrite` / `chapter.write` / `applyFoundationChange({ rewriteChapters: true })` 未提供 `llm`。 |
 | `FoundationGenerateError` | 非法 `keys`，或 `complete().text` 不是 JSON 对象。 |
-| `SessionBusyError` | `startAutoWrite`、`chapter.write` 或 `applyFoundationChange` 进行中再调用另一个（同线程与 Worker 桥均如此）。 |
+| `SessionBusyError` | `startAutoWrite`、`chapter.write`、`chapter.delete` 或 `applyFoundationChange` 进行中再调用另一个（同线程与 Worker 桥均如此）。 |
 | `ChapterConflictError` | 模式前置失败（已有终稿还 create、没有草稿却 continue、没有终稿却 rewrite/polish）。 |
 | `ChapterRunnerError` | 非法章号、空的 `saveFinal`、或作者循环没有产出终稿。 |
 | `SessionClosedError` | 在已关闭的 session 上调用（包括 `switchTo` 之后）。 |
@@ -394,8 +399,11 @@ MockLlm：脚本 `toolCalls`（与 S2 的 `generateFoundation` 用 `text` 里的
 | `KitWorkerError` | class | 没有 `Worker`、Worker 模式用了自定义 store、init 超时。 |
 | `KitWorkspaceDisabledError` | class | `workspace: false` 或自定义 `StorePort` 时调用多书方法。 |
 | `KitClosedError` | class | `dispose()` 之后再调用。 |
+| Session 类型 | type | 再导出：`FoundationPatch`、`FoundationMeta`、`InspectResult`、`AutoWriteResult`、`FoundationImpactAssessment`、`ChapterView`、`ChapterWriteInput`、`ChapterWriteResult`、`SessionEvent`、`SessionUnsubscribe`、apply/assess 选项与结果、`BookControlResult`、`ChapterDeleteResult` 等。 |
 
 `runtime: "main"` 必须传 `llm`；Worker 模式下可选（Worker 用 `llmEndpoint`；两个都传时 Worker 仍用 `llmEndpoint`）。`bookId` 默认 `"default"`。没有 OPFS 且 `fallbackToMemory` 为 true（默认）时回落到 `MemoryStore`。
+
+Kit 方法一一包装 Session，包括 `pauseBook` / `resumeBook` / `steerBook`、`deleteChapter`、`updateOutline`（upsert，无评估/确认）。`startBook` 接受 `confirmAuditGap`。
 
 示意：[`examples/kit-host.ts`](../examples/kit-host.ts)。
 

@@ -147,16 +147,15 @@ await kit.fillFoundation({
 // 或者：await kit.generateFoundation({ prompt, keys: ["book", "premise", "outline", "characters", "world_rules"] });
 
 let outcome = await kit.startBook({ prompt, generateMissing: true });
-if (outcome.status === "needs_foundation") {
-  // 设定文件都齐之后，剩下的缺口通常是 `foundation_audit`。
-  // generateMissing 写不了审查（由 Engine 的 audit_foundation 写）。
-  // 默认 requireConfirmGaps: true 会在 Engine.run 之前停下——确认后再继续：
-  outcome = await kit.startBook({ prompt, requireConfirmGaps: false });
+if (outcome.status === "needs_foundation" && outcome.auditOnly) {
+  // 剩下的缺口只有 foundation_audit — 宿主确认后，由 Engine 写审查。
+  // 不要在这里用 requireConfirmGaps: false：那会连 book/premise/outline 缺口一并跳过。
+  outcome = await kit.startBook({ prompt, confirmAuditGap: true });
 }
 // outcome.status === "completed" | "stopped" | 若还有别的缺口则仍是 "needs_foundation"
 ```
 
-`fillFoundation` 是 upsert（没有确认闸门）。`startBook` 在默认 `requireConfirmGaps: true` 时，**只要还有缺口就不会**调用 `Engine.run`——包括填齐设定后仍在的 `foundation_audit`。这是工作台 UI 的有意闸门。
+`fillFoundation` 是 upsert（没有确认闸门）。`startBook` 在默认 `requireConfirmGaps: true` 时，**只要还有缺口就不会**调用 `Engine.run`——包括填齐设定后仍在的 `foundation_audit`。`inspect().auditOnly` / `needs_foundation.auditOnly` 告诉宿主剩下的只是审查缺口。`generateMissing` 关不掉 `foundation_audit`。
 
 脚本化 Engine mock 跑到 `phase=complete`（绕过 Kit 缺口闸门）：[`examples/short-book.ts`](examples/short-book.ts) · [指南 §1](docs/guide.zh-CN.md#scenario-short-book) · `npm run test:short`。
 
@@ -205,12 +204,12 @@ await kit.fillFoundation({
 });
 
 let outcome = await kit.startBook({ prompt, generateMissing: true });
-if (outcome.status === "needs_foundation") {
-  outcome = await kit.startBook({ prompt, requireConfirmGaps: false });
+if (outcome.status === "needs_foundation" && outcome.auditOnly) {
+  outcome = await kit.startBook({ prompt, confirmAuditGap: true });
 }
 ```
 
-分层 Engine mock（卷/弧，弧末审阅 → `expand_next_arc`）：[`examples/layered-book.ts`](examples/layered-book.ts) · [指南 §2](docs/guide.zh-CN.md#scenario-layered-book) · `npm run test:layered`。Kit **不**暴露 Engine 的 `pause` / `resume` / `steer`——`startBook` 会一直跑到完结、idle、引擎内暂停或 `maxSteps`。
+分层 Engine mock（卷/弧，弧末审阅 → `expand_next_arc`）：[`examples/layered-book.ts`](examples/layered-book.ts) · [指南 §2](docs/guide.zh-CN.md#scenario-layered-book) · `npm run test:layered`。长篇运行：`pauseBook` / `resumeBook` / `steerBook(message)` 转发到 `startBook` 期间持有的 Engine（main 与 worker）。没有在跑时调用会返回 `{ status: "idle" }`（空操作，不是异常）。
 
 <a id="change-meta"></a>
 
@@ -246,7 +245,7 @@ if (outcome.status === "needs_confirm") {
 
 ### 如何获取元信息
 
-每次读取都是 **store 直读**（Kit 不缓存）。没有单独的目录 API：大纲在 `getMeta()` 上，正文用 `getChapter(n)`。
+每次读取都是 **store 直读**（Kit 不缓存）。大纲在 `getMeta()` 上。`updateOutline({ outline? , layeredOutline? })` 通过 `fillFoundation` upsert 这些键（整文件替换，**没有**评估/确认闸门）。正文用 `getChapter(n)`。
 
 ```ts
 const meta = await kit.getMeta();
@@ -271,15 +270,16 @@ const chapters = await kit.listArtifacts("chapters/"); // 例如 chapters/01.md
 
 ### 如何处理章节（增删改查）
 
-Kit 对应 Session ChapterRunner：`getChapter` / `writeChapter` / `saveChapter`。章号从 **1** 起。
+Kit 对应 Session ChapterRunner：`getChapter` / `writeChapter` / `saveChapter` / `deleteChapter`。章号从 **1** 起。
 
-**Kit 与 Session 都没有删章 API。** `StorePort.remove` 存在，但只用于其它路径（Session 用它丢掉过期的 `foundation_audit`）；宿主不能通过本 SDK 删除 `chapters/NN.md`。
+`deleteChapter(n, { syncOutline? })` 删除 `drafts/NN.plan.json`、`drafts/NN.draft.md`、`chapters/NN.md`、`summaries/NN.json`（审阅文件留着）。会从 `completedChapters` / `pendingRewrites` 去掉 `n`；若 `currentChapter` 指向 `n` 则钳到剩余最大值；若删掉已完成章且 `phase === "complete"`，phase 回到 `writing`。`totalChapters` 不变。`syncOutline: true` 会 upsert 扁平 `outline` 和/或 `layeredOutline` 去掉该行（不重编号；删掉扁平大纲最后一行不受支持，因为 upsert 禁止空数组）。需要 `StorePort.remove`（MemoryStore / OpfsStore）。与 `startBook` / `writeChapter` / `applyFoundation` 共用 busy 标志。
 
 | 意图 | API | 说明 |
 | --- | --- | --- |
 | 读 | `getChapter(n)` | `{ chapter, plan, draft, final, summary }`；什么都没有则 **`null`** |
 | LLM 写 | `writeChapter({ chapter, mode, instruction?, title?, force? })` | 专用作者循环——**不是** `Engine.run`，**不是** `pendingRewrites` |
 | 宿主 Markdown | `saveChapter(n, markdown)` | 写终稿，不调 LLM。空字符串会抛错 |
+| 删除 | `deleteChapter(n, { syncOutline? })` | 上述产物；可选 TOC upsert。Busy |
 
 `writeChapter` 的 `mode`（`CHAPTER_WRITE_MODES`）：
 
@@ -302,6 +302,7 @@ await kit.writeChapter({
 });
 
 await kit.saveChapter(1, "# 风暴之后\n\n……");
+await kit.deleteChapter(1, { syncOutline: true });
 ```
 
 `writeChapter` 需要 `llm`（main）或可用的 `llmEndpoint`（worker）。它与 `startBook` / `applyFoundation` 共用 **busy** 标志（`SessionBusyError`）。给 `writeChapter` 用的 MockLlm 必须返回 **toolCalls**（`plan_chapter` / `draft_chapter` / `commit_chapter`）；`generateFoundation` 则从 **`text` 里读 JSON**。指南：[§7.3](docs/guide.zh-CN.md#scenario-session-chapter)。
@@ -324,6 +325,7 @@ await kit.importBook(bytes);              // merge 恢复；不会删除目标�
 ```ts
 const off = kit.subscribe((event) => {
   // "foundation_updated" | "auto_write_step" | "chapter_step" | "stopped"
+  // | "paused" | "resumed" | "steered"
   console.log(event.type);
 });
 off();           // 取消订阅
@@ -380,14 +382,14 @@ const catalog = await kit.listBooks(); // { bookId, createdAt, title? }[]
 | `./llm` | `novel-engine/llm` | 可选 fetch `LlmPort` 适配器（OpenAI、Anthropic、DashScope） |
 
 ```ts
-import { NovelKit } from "novel-engine/kit";
+import { NovelKit, type FoundationPatch, type InspectResult } from "novel-engine/kit";
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 import { createEngine, MockLlm, exportBookSnapshot } from "novel-engine";
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 ```
 
-`./kit` **不会**再导出 Session 类型（`FoundationPatch`、`InspectResult` …）。请靠推断，或从 `novel-engine/session` 导入类型。默认 `.` / `./worker` / `./llm` 包不会拉进 Kit 或 Session。
+`./kit` 会再导出宿主常用的 Session 类型（`FoundationPatch`、`FoundationMeta`、`InspectResult`、`AutoWriteResult`、`SessionEvent`、apply/assess/章节类型等）。运行时 Kit 表面仍是 `NovelKit` + kit 错误/协议。默认 `.` / `./worker` / `./llm` 包不会拉进 Kit 或 Session。
 
 <a id="novelkit-create"></a>
 
@@ -423,16 +425,16 @@ import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 
 名称一一对应 Session（不重写业务规则）。`dispose()` 之后再调任何方法都会抛 `KitClosedError`。
 
-Busy 标志（Session 的 `SessionBusyError`）：**`startBook`**、**`writeChapter`**、**`applyFoundation`** 互斥。`inspect` / `fillFoundation` / `generateFoundation` / `assessFoundation` / `getChapter` / `saveChapter` / 读取 / 导出 **不**占用该标志。
+Busy 标志（Session 的 `SessionBusyError`）：**`startBook`**、**`writeChapter`**、**`applyFoundation`**、**`deleteChapter`** 互斥。`pauseBook` / `resumeBook` / `steerBook` **不**占 busy（只在 `startBook` 的 Engine 在跑时生效）。`inspect` / `fillFoundation` / `generateFoundation` / `assessFoundation` / `getChapter` / `saveChapter` / `updateOutline` / 读取 / 导出 **不**占用该标志。
 
 #### 检查 / 就绪
 
 | 方法 | 返回 | 说明 |
 | --- | --- | --- |
-| `inspect({ prompt? })` | `InspectResult` | `{ meta, gaps, readyToWrite, planning }`。`prompt`（否则 run_meta / progress / 分层大纲）决定缺口表用的规划档位 |
+| `inspect({ prompt? })` | `InspectResult` | `{ meta, gaps, readyToWrite, planning, auditOnly }`。`prompt`（否则 run_meta / progress / 分层大纲）决定缺口表用的规划档位 |
 | `assertReady({ prompt? })` | `void` | 未就绪时抛 `FoundationIncompleteError`（`.gaps`） |
 
-`readyToWrite` 为 true 当且仅当 `foundationMissing` 为空。中长篇若有有效的 `layered_outline.json`，**不**需要扁平 `outline.json`。book/premise/outline/characters/worldRules 都齐之后，剩下的缺口常常是 **`foundation_audit`**，直到 phase 为 `writing` 或 `complete`（由 Engine 写审查）。
+`readyToWrite` 为 true 当且仅当 `foundationMissing` 为空。中长篇若有有效的 `layered_outline.json`，**不**需要扁平 `outline.json`。book/premise/outline/characters/worldRules 都齐之后，剩下的缺口常常是 **`foundation_audit`**（`auditOnly: true`），直到 phase 为 `writing` 或 `complete`（由 Engine 写审查）。用 `confirmAuditGap: true` 重试——不要为了跳过审查去关 `requireConfirmGaps`。
 
 #### 设定写入
 
@@ -440,7 +442,8 @@ Busy 标志（Session 的 `SessionBusyError`）：**`startBook`**、**`writeChap
 | --- | --- | --- | --- |
 | `fillFoundation(patch)` | `FoundationPatch` | `FoundationMeta` | Upsert。省略的键不变。数组**整文件替换**。指纹文件变化会作废 `foundation_audit`。**没有**评估 / 确认 |
 | `generateFoundation({ prompt, keys, mode? })` | keys：`book` \| `premise` \| `outline` \| `layered_outline` \| `characters` \| `world_rules` | `FoundationMeta` | 一次性 LLM，**JSON 在 `text` 里**（不是 toolCalls）。`mode`：`"fill_missing"`（默认）或 `"overwrite"`。需要 `llm` / Worker endpoint。**不是** Engine 循环，**不**占 busy |
-| `startBook({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | — | `AutoWriteResult` | 可选 upsert/generate，然后 `{ status: "needs_foundation", gaps, meta }` **或** `Engine.run` → `{ status: "completed" \| "stopped", result, meta }`。默认 `requireConfirmGaps: true`。占 busy |
+| `startBook({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps? })` | — | `AutoWriteResult` | 可选 upsert/generate，然后 `{ status: "needs_foundation", gaps, meta, auditOnly }` **或** `Engine.run` → `{ status: "completed" \| "stopped", result, meta }`。默认 `requireConfirmGaps: true`。`confirmAuditGap: true` 仅在剩下的缺口都是审查时放行。占 busy |
+| `pauseBook()` / `resumeBook()` / `steerBook(message)` | — | `{ status: "ok" \| "idle" }` | 转发到 `startBook` 期间持有的 Engine。没有在跑则为 `idle`（空操作）。空 steer 笔记抛 `EngineError`。不占 busy |
 
 `generateFoundation` 的 keys 是 **snake_case**（`layered_outline`、`world_rules`）；patch 字段是 **camelCase**（`layeredOutline`、`worldRules`）。`BookMetadata` 只有 `{ title, synopsis }`。
 
@@ -462,8 +465,8 @@ Busy 标志（Session 的 `SessionBusyError`）：**`startBook`**、**`writeChap
 | `getChapter(n)` | `ChapterView \| null` | `n` 为大于 0 的整数 |
 | `writeChapter(input)` | `ChapterWriteResult` `{ chapter, mode, view, turns }` | 模式见上。占 busy。需要 LLM |
 | `saveChapter(n, markdown)` | `void` | 不调 LLM。markdown 必须非空 |
-
-**没有 `deleteChapter`。**
+| `deleteChapter(n, { syncOutline? })` | `ChapterDeleteResult` | 删除 plan/draft/final/summary。占 busy。`syncOutline` 会 upsert 去掉该行的 TOC |
+| `updateOutline({ outline?, layeredOutline? })` | `FoundationMeta` | 经 `fillFoundation` upsert（无评估/确认）。至少要有一个键 |
 
 #### 读取 / 快照 / 工作区 / 事件
 
@@ -506,7 +509,7 @@ Kit 默认不合适时再用（自定义 `createStore`、脚本化 Engine 循环
 | 不经 Kit 用 OPFS | `createOpfsStore` / `OpfsStore.open` | `novel-engine` |
 | 供应商 fetch LLM | `createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm` / `createVendorLlm` | `novel-engine/llm` |
 
-Kit → Session 名称：`inspect` → `inspectFoundation`，`assertReady` → `assertReadyToWrite`，`fillFoundation` → `upsertFoundation`，`startBook` → `startAutoWrite`，`assessFoundation` → `assessFoundationImpact`，`applyFoundation` → `applyFoundationChange`，`getChapter`/`writeChapter`/`saveChapter` → `chapter.get`/`write`/`saveFinal`，`getMeta` → `getFoundation`，`exportBook`/`importBook` → `exportSnapshot`/`importSnapshot`，`dispose` → `close`（外加终止 worker）。
+Kit → Session 名称：`inspect` → `inspectFoundation`，`assertReady` → `assertReadyToWrite`，`fillFoundation` → `upsertFoundation`，`startBook` → `startAutoWrite`，`pauseBook`/`resumeBook`/`steerBook` → `pause`/`resume`/`steer`，`assessFoundation` → `assessFoundationImpact`，`applyFoundation` → `applyFoundationChange`，`getChapter`/`writeChapter`/`saveChapter`/`deleteChapter` → `chapter.get`/`write`/`saveFinal`/`delete`，`updateOutline` → `upsertFoundation`（大纲键），`getMeta` → `getFoundation`，`exportBook`/`importBook` → `exportSnapshot`/`importSnapshot`，`dispose` → `close`（外加终止 worker）。
 
 ---
 
@@ -517,7 +520,7 @@ Kit → Session 名称：`inspect` → `inspectFoundation`，`assertReady` → `
 - Arbiter（仲裁器）完整语义场景（`plan_start` 只是关键词桩）
 - ChapterAdvanceGate 审阅模式 UI
 - Node 文件系统适配器——若需要 `fs`，请在本库外部实现 `StorePort`
-- **删章**、Kit 上的 Engine `pause`/`resume`/`steer`、会话中途换 LLM、`new NovelKit()`
+- 会话中途换 LLM、`new NovelKit()`
 
 ## 开发 / 测试
 

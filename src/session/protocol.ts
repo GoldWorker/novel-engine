@@ -13,6 +13,9 @@ import { CHAPTER_WRITE_MODES, FOUNDATION_IMPACT_MODES, type FoundationGap } from
 import type { Progress } from "../domain/progress.js";
 import type {
   AutoWriteResult,
+  BookControlResult,
+  ChapterDeleteOptions,
+  ChapterDeleteResult,
   ChapterView,
   ChapterWriteInput,
   ChapterWriteResult,
@@ -27,6 +30,7 @@ import type {
   AssessFoundationImpactOptions,
   FoundationImpactAssessment,
 } from "./types.js";
+import { EngineError } from "../engine/index.js";
 
 /** Protocol version on every session host ↔ worker message. Distinct `ns` from Engine. */
 export const SESSION_PROTOCOL = 1 as const;
@@ -47,9 +51,13 @@ export type SessionCommandType =
   | "assessFoundationImpact"
   | "applyFoundationChange"
   | "startAutoWrite"
+  | "pause"
+  | "resume"
+  | "steer"
   | "chapterGet"
   | "chapterSaveFinal"
   | "chapterWrite"
+  | "chapterDelete"
   | "close";
 
 export type SessionNoticeType = "result" | "event" | "error";
@@ -100,6 +108,12 @@ export type SessionAutoWriteCommand = SessionEnvelope & {
   type: "startAutoWrite";
   options: StartAutoWriteOptions;
 };
+export type SessionPauseCommand = SessionEnvelope & { type: "pause" };
+export type SessionResumeCommand = SessionEnvelope & { type: "resume" };
+export type SessionSteerCommand = SessionEnvelope & {
+  type: "steer";
+  note: string;
+};
 export type SessionChapterGetCommand = SessionEnvelope & {
   type: "chapterGet";
   chapter: number;
@@ -112,6 +126,11 @@ export type SessionChapterSaveFinalCommand = SessionEnvelope & {
 export type SessionChapterWriteCommand = SessionEnvelope & {
   type: "chapterWrite";
   input: ChapterWriteInput;
+};
+export type SessionChapterDeleteCommand = SessionEnvelope & {
+  type: "chapterDelete";
+  chapter: number;
+  options?: ChapterDeleteOptions;
 };
 export type SessionCloseCommand = SessionEnvelope & { type: "close" };
 
@@ -128,9 +147,13 @@ export type SessionCommand =
   | SessionAssessImpactCommand
   | SessionApplyFoundationCommand
   | SessionAutoWriteCommand
+  | SessionPauseCommand
+  | SessionResumeCommand
+  | SessionSteerCommand
   | SessionChapterGetCommand
   | SessionChapterSaveFinalCommand
   | SessionChapterWriteCommand
+  | SessionChapterDeleteCommand
   | SessionCloseCommand;
 
 export type SessionResultNotice = {
@@ -175,9 +198,13 @@ export type SessionRpcResult = {
   assessFoundationImpact: FoundationImpactAssessment;
   applyFoundationChange: ApplyFoundationChangeResult;
   startAutoWrite: AutoWriteResult;
+  pause: BookControlResult;
+  resume: BookControlResult;
+  steer: BookControlResult;
   chapterGet: ChapterView | null;
   chapterSaveFinal: null;
   chapterWrite: ChapterWriteResult;
+  chapterDelete: ChapterDeleteResult;
   close: null;
 };
 
@@ -211,12 +238,22 @@ export function isSessionCommand(value: unknown): value is SessionCommand {
       return isApplyFoundationOptions(value.options);
     case "startAutoWrite":
       return isAutoWriteOptions(value.options);
+    case "pause":
+    case "resume":
+      return true;
+    case "steer":
+      return typeof value.note === "string";
     case "chapterGet":
       return typeof value.chapter === "number";
     case "chapterSaveFinal":
       return typeof value.chapter === "number" && typeof value.markdown === "string";
     case "chapterWrite":
       return isChapterWriteInput(value.input);
+    case "chapterDelete":
+      return (
+        typeof value.chapter === "number" &&
+        (value.options === undefined || isChapterDeleteOptions(value.options))
+      );
     default:
       return false;
   }
@@ -289,6 +326,8 @@ export function restoreSessionError(payload: {
       return new WorkspaceClosedError(payload.message);
     case "BookNotFoundError":
       return new BookNotFoundError(payload.bookId ?? payload.message);
+    case "EngineError":
+      return new EngineError(payload.message);
     default: {
       const err = new Error(payload.message);
       err.name = payload.name;
@@ -375,6 +414,9 @@ function isAutoWriteOptions(value: unknown): value is StartAutoWriteOptions {
   if (value.requireConfirmGaps !== undefined && typeof value.requireConfirmGaps !== "boolean") {
     return false;
   }
+  if (value.confirmAuditGap !== undefined && typeof value.confirmAuditGap !== "boolean") {
+    return false;
+  }
   if (value.maxSteps !== undefined && typeof value.maxSteps !== "number") {
     return false;
   }
@@ -398,4 +440,11 @@ function isChapterWriteInput(value: unknown): value is ChapterWriteInput {
     return false;
   }
   return true;
+}
+
+function isChapterDeleteOptions(value: unknown): value is ChapterDeleteOptions {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return value.syncOutline === undefined || typeof value.syncOutline === "boolean";
 }

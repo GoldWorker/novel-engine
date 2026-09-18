@@ -260,6 +260,99 @@ describe("session worker protocol", () => {
     attached.detach();
   });
 
+  it("pause / resume / steer reach the Engine across the bridge", async () => {
+    const { host, worker } = createLinkedMessagePorts();
+    const store = new MemoryStore();
+    let release!: (value: LlmCompletionResult) => void;
+    const gate = new Promise<LlmCompletionResult>((resolve) => {
+      release = resolve;
+    });
+    const llm = MockLlm.fromHandler(() => gate);
+    const attached = attachSessionWorker(worker, {
+      createSession: () => createNovelSession({ store, llm, bookId: "ctrl" }),
+    });
+    const session = createSessionClient(host, { bookId: "ctrl" });
+    await session.upsertFoundation({
+      book: short.book,
+      premise: short.premise,
+      outline: short.outline,
+      characters: short.characters,
+      worldRules: short.world_rules,
+    });
+    await store.saveProgress({
+      phase: "writing",
+      flow: "writing",
+      totalChapters: 3,
+      completedChapters: [],
+      pendingRewrites: [],
+      layered: false,
+    });
+
+    const events: SessionEvent["type"][] = [];
+    session.subscribe((event) => {
+      events.push(event.type);
+    });
+
+    const pending = session.startAutoWrite({ prompt: short.prompt, maxSteps: 8 });
+    await waitFor(() => llm.callCount > 0);
+    expect(await session.pause()).toEqual({ status: "ok" });
+    expect(await session.steer("往和解写")).toEqual({ status: "ok" });
+    release({ text: "noop" });
+    await waitFor(() => events.includes("paused"));
+    expect(events).toContain("steered");
+    expect(await session.resume()).toEqual({ status: "ok" });
+    await pending;
+
+    expect(await session.pause()).toEqual({ status: "idle" });
+    session.close();
+    attached.detach();
+  });
+
+  it("chapterDelete over the bridge removes artifacts", async () => {
+    const { host, worker } = createLinkedMessagePorts();
+    const store = new MemoryStore();
+    const attached = attachSessionWorker(worker, {
+      createSession: () => createNovelSession({ store, bookId: "del" }),
+    });
+    const session = createSessionClient(host, { bookId: "del" });
+    await writeText(store, "chapters/01.md", "终稿");
+    const result = await session.chapter.delete(1);
+    expect(result.removed).toContain("chapters/01.md");
+    expect(await session.chapter.get(1)).toBeNull();
+    session.close();
+    attached.detach();
+  });
+
+  it("accepts pause / steer / chapterDelete commands", () => {
+    expect(
+      isSessionCommand({
+        v: SESSION_PROTOCOL,
+        ns: SESSION_NS,
+        type: "pause",
+        id: "s-p",
+      }),
+    ).toBe(true);
+    expect(
+      isSessionCommand({
+        v: SESSION_PROTOCOL,
+        ns: SESSION_NS,
+        type: "steer",
+        id: "s-s",
+        note: "往左",
+      }),
+    ).toBe(true);
+    expect(
+      isSessionCommand({
+        v: SESSION_PROTOCOL,
+        ns: SESSION_NS,
+        type: "chapterDelete",
+        id: "s-d",
+        chapter: 1,
+        options: { syncOutline: true },
+      }),
+    ).toBe(true);
+  });
+
   it("posts error for an invalid command", async () => {
     const { host, worker } = createLinkedMessagePorts();
     const notices: unknown[] = [];

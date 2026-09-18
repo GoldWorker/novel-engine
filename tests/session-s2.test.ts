@@ -159,8 +159,59 @@ describe("NovelSession S2 startAutoWrite", () => {
       throw new Error("expected needs_foundation");
     }
     expect(result.gaps.map((gap) => gap.key)).toEqual(["foundation_audit"]);
+    expect(result.gaps[0]?.kind).toBe("audit");
+    expect(result.auditOnly).toBe(true);
     expect(result.meta.book).toEqual(short.book);
     expect(llm.callCount).toBe(1);
+  });
+
+  it("confirmAuditGap proceeds when leftover is only foundation_audit", async () => {
+    const store = new MemoryStore();
+    const session = await createNovelSession({
+      store,
+      llm: MockLlm.fromHandler(shortBookLlmHandler(short)),
+      bookId: "audit-confirm",
+    });
+    await session.upsertFoundation({
+      book: short.book,
+      premise: short.premise,
+      outline: short.outline,
+      characters: short.characters,
+      worldRules: short.world_rules,
+    });
+    const blocked = await session.startAutoWrite({ prompt: short.prompt, maxSteps: 4 });
+    expect(blocked.status).toBe("needs_foundation");
+    if (blocked.status !== "needs_foundation") {
+      throw new Error("expected needs_foundation");
+    }
+    expect(blocked.auditOnly).toBe(true);
+
+    const result = await session.startAutoWrite({
+      prompt: short.prompt,
+      confirmAuditGap: true,
+      maxSteps: 24,
+    });
+    expect(result.status).not.toBe("needs_foundation");
+  });
+
+  it("confirmAuditGap does not skip non-audit gaps", async () => {
+    const llm = new MockLlm([{ text: "engine should not be called" }]);
+    const session = await createNovelSession({
+      store: new MemoryStore(),
+      llm,
+      bookId: "not-only-audit",
+    });
+    const result = await session.startAutoWrite({
+      prompt: short.prompt,
+      confirmAuditGap: true,
+    });
+    expect(result.status).toBe("needs_foundation");
+    if (result.status !== "needs_foundation") {
+      throw new Error("expected needs_foundation");
+    }
+    expect(result.auditOnly).toBe(false);
+    expect(result.gaps.some((gap) => gap.key === "book")).toBe(true);
+    expect(llm.callCount).toBe(0);
   });
 
   it("runs Engine when foundation is complete (short-book mock)", async () => {

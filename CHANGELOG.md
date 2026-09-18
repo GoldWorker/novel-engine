@@ -2,12 +2,18 @@
 
 ## Unreleased
 
+## 0.6.0 — 2026-09-18
+
+### Added
+
+- **Long-form control on Session / NovelKit** — `session.pause` / `resume` / `steer(note)` wrap the Engine instance held during `startAutoWrite` (not a second control plane). Kit names: `pauseBook` / `resumeBook` / `steerBook(message)`. Same RPCs on the Session worker bridge (`pause` / `resume` / `steer`), so `runtime: "worker"` matches `runtime: "main"`. Returns `{ status: "ok" }` or `{ status: "idle" }` (no Engine running — documented no-op, not an exception). Empty steer notes throw `EngineError`. `subscribe` emits `paused` / `resumed` / `steered`. Does **not** take the busy flag; `startBook` / `writeChapter` / `applyFoundation` / `deleteChapter` still throw `SessionBusyError` while one of those is in flight.
+- **Start-writing audit gate** — `InspectResult.auditOnly` and `needs_foundation.auditOnly` when leftover gaps are only `foundation_audit`. `confirmAuditGap: true` proceeds to `Engine.run` in that case without disabling `requireConfirmGaps` for non-audit gaps. `FoundationGap.kind` is `"audit"` | `"artifact"`. Happy path: fill → if only audit → confirm with the new flag → write.
+- **Chapter delete + TOC helper** — `session.chapter.delete(n, { syncOutline? })` / `kit.deleteChapter`. Removes `drafts/NN.plan.json`, `drafts/NN.draft.md`, `chapters/NN.md`, `summaries/NN.json`. Drops `n` from `completedChapters` / `pendingRewrites`; clamps `currentChapter`; `complete` → `writing` if a completed chapter was removed; `totalChapters` unchanged. `syncOutline: true` upserts flat/layered outline without that row (no renumbering; last remaining flat-outline row unsupported because upsert forbids empty arrays). Reviews (`reviews/*`) are left in place. `kit.updateOutline({ outline?, layeredOutline? })` is a thin upsert (no assess/confirm). Requires `StorePort.remove`.
+- **Type re-exports from `novel-engine/kit`** — `FoundationPatch`, `FoundationMeta`, `InspectResult`, `AutoWriteResult`, `FoundationImpactAssessment`, `ChapterView`, `ChapterWriteInput`, `ChapterWriteResult`, `SessionEvent`, `SessionUnsubscribe`, apply/assess option/result types, plus new 0.6 types. Runtime Kit surface otherwise unchanged besides the new methods.
+
 ### Documentation
 
-- Consolidate host docs to **three bodies** (plus thin indexes): [guide](docs/guide.md) (how-to — Kit first, install, LLM adapters, Engine / Session copy-paste flows), [api](docs/api.md) (stable exports plus Session S0–S6 contracts, errors, protocol), [architecture](docs/architecture.md) (internals). Removed `docs/guide-kit.md`, `docs/session.md`, `docs/llm-adapters.md` and ZH counterparts; in-repo links updated. No package version bump.
-- Root README is a host landing a newcomer can use alone: **(1) usage scenarios** (install, `NovelKit.create`, short/long Kit paths, mid-story assess→apply, read meta, chapter CRUD that exists — **no delete-chapter API**, export/import, subscribe/dispose, multi-book, Worker notes) with copy-paste Kit snippets; **(2) API catalog by surface** (package entries, `NovelKit.create` options + readonly fields + every public method, Session/Engine pointer table). EN/ZH stay in parity. Deep audited 7.2a–e flows stay in the [guide](docs/guide.md).
-- Kit **Initialize** (root README + guide Kit defaults) now documents how to **wire the LLM at `NovelKit.create`**: when `llm` vs `llmEndpoint` is required/ignored, init-time only (no mid-session swap), worker `llmEndpoint` snippet, and main-thread `llm` via `createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm` or a custom `LlmPort` / `MockLlm`. Create-options tables in the README API catalog match. EN/ZH stay in parity.
-- Doc/code corrections while rewriting the landing: `BookMetadata` is `{ title, synopsis }` only (no tags); `writeChapter` `rewrite` `instruction` is optional; `startBook` leftover gap after a complete fill is often `foundation_audit` (`generateMissing` cannot write it); Kit does not expose Engine `pause`/`resume`/`steer` or a delete-chapter API; `./kit` does not re-export Session types. Guide/API headings that said otherwise were aligned with code.
+- README + guide 7.x + api + architecture (EN/ZH) document the new APIs, busy rules, and the fill → audit-only confirm → write path. Package version **0.6.0**.
 
 ## 0.5.0 — 2026-09-18
 

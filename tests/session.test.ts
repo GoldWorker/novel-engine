@@ -79,6 +79,7 @@ describe("NovelSession", () => {
     expect(empty.planning.tier).toBe("short");
     expect(empty.planning.source).toBe("prompt");
     expect(empty.readyToWrite).toBe(false);
+    expect(empty.auditOnly).toBe(false);
     expect(empty.gaps.map((gap) => gap.key)).toEqual([
       "book",
       "premise",
@@ -106,7 +107,9 @@ describe("NovelSession", () => {
         path: PATHS.foundationAudit,
       }),
     ]);
-    expect(pending.gaps[0]?.hint).toMatch(/audit_foundation/);
+    expect(pending.gaps[0]?.hint).toMatch(/audit_foundation|confirmAuditGap/);
+    expect(pending.auditOnly).toBe(true);
+    expect(pending.gaps[0]?.kind).toBe("audit");
 
     await expect(session.assertReadyToWrite()).rejects.toBeInstanceOf(FoundationIncompleteError);
     try {

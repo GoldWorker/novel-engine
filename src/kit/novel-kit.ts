@@ -8,7 +8,10 @@ import {
   type ApplyFoundationChangeResult,
   type AssessFoundationImpactOptions,
   type AutoWriteResult,
+  type BookControlResult,
   type BookIndexEntry,
+  type ChapterDeleteOptions,
+  type ChapterDeleteResult,
   type ChapterView,
   type ChapterWriteInput,
   type ChapterWriteResult,
@@ -19,6 +22,7 @@ import {
   type InspectResult,
   type NovelSession,
   type NovelWorkspace,
+  type OutlineUpdate,
   type SessionEvent,
   type SessionUnsubscribe,
   type StartAutoWriteOptions,
@@ -169,6 +173,21 @@ export class NovelKit {
     return this.session.startAutoWrite(options);
   }
 
+  async pauseBook(): Promise<BookControlResult> {
+    this.assertOpen();
+    return this.session.pause();
+  }
+
+  async resumeBook(): Promise<BookControlResult> {
+    this.assertOpen();
+    return this.session.resume();
+  }
+
+  async steerBook(message: string): Promise<BookControlResult> {
+    this.assertOpen();
+    return this.session.steer(message);
+  }
+
   async assessFoundation(
     patch: FoundationPatch,
     options: AssessFoundationImpactOptions = {},
@@ -202,6 +221,26 @@ export class NovelKit {
   async saveChapter(chapter: number, markdown: string): Promise<void> {
     this.assertOpen();
     return this.session.chapter.saveFinal(chapter, markdown);
+  }
+
+  async deleteChapter(
+    chapter: number,
+    options: ChapterDeleteOptions = {},
+  ): Promise<ChapterDeleteResult> {
+    this.assertOpen();
+    return this.session.chapter.delete(chapter, options);
+  }
+
+  /**
+   * Upsert outline and/or layeredOutline (whole-file replace). Same path as
+   * `fillFoundation` — **no** assess/confirm gate. At least one key required.
+   */
+  async updateOutline(patch: OutlineUpdate): Promise<FoundationMeta> {
+    this.assertOpen();
+    if (patch.outline === undefined && patch.layeredOutline === undefined) {
+      throw new Error("updateOutline requires outline and/or layeredOutline");
+    }
+    return this.session.upsertFoundation(patch);
   }
 
   async getMeta(): Promise<FoundationMeta> {

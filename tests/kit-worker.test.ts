@@ -170,4 +170,82 @@ describe("kit worker init protocol", () => {
       }
     }
   });
+
+  it("pause / steer / resume during startAutoWrite after kit init", async () => {
+    const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const g = globalThis as unknown as {
+      fetch: () => Promise<{
+        ok: boolean;
+        status: number;
+        statusText: string;
+        text(): Promise<string>;
+      }>;
+    };
+    g.fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        await gate;
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        async text() {
+          return JSON.stringify({ text: "noop" });
+        },
+      };
+    };
+
+    try {
+      const { host, worker } = createLinkedMessagePorts();
+      const attached = attachKitWorker(worker);
+      const connected = await connectKitWorker({
+        port: host,
+        bookId: "ctrl",
+        llmEndpoint: "/api/llm",
+        store: "memory",
+        fallbackToMemory: true,
+      });
+      await connected.session.upsertFoundation({
+        book: short.book,
+        premise: short.premise,
+        outline: short.outline,
+        characters: short.characters,
+        worldRules: short.world_rules,
+      });
+
+      const events: string[] = [];
+      connected.session.subscribe((event) => {
+        events.push(event.type);
+      });
+
+      const pending = connected.session.startAutoWrite({
+        prompt: short.prompt,
+        confirmAuditGap: true,
+        maxSteps: 6,
+      });
+      await waitFor(() => calls > 0);
+      expect(await connected.session.pause()).toEqual({ status: "ok" });
+      expect(await connected.session.steer("往和解写")).toEqual({ status: "ok" });
+      release();
+      await waitFor(() => events.includes("paused"));
+      expect(await connected.session.resume()).toEqual({ status: "ok" });
+      await pending;
+      expect(await connected.session.pause()).toEqual({ status: "idle" });
+
+      connected.session.close();
+      attached.detach();
+    } finally {
+      if (originalFetch === undefined) {
+        delete (globalThis as { fetch?: unknown }).fetch;
+      } else {
+        (globalThis as unknown as { fetch: unknown }).fetch = originalFetch;
+      }
+    }
+  });
 });

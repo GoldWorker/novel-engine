@@ -39,3 +39,36 @@ export type {
 export { defaultKitWorkerUrl } from "./worker-url.js";
 export { attachKitWorker } from "./worker-runtime.js";
 export type { AttachKitWorkerHandle } from "./worker-runtime.js";
+
+export type {
+  ApplyFoundationApplied,
+  ApplyFoundationChangeOptions,
+  ApplyFoundationChangeResult,
+  ApplyFoundationNeedsConfirm,
+  AssessFoundationImpactOptions,
+  AutoWriteEngineOutcome,
+  AutoWriteNeedsFoundation,
+  AutoWriteResult,
+  BookControlResult,
+  ChapterDeleteOptions,
+  ChapterDeleteResult,
+  ChapterRange,
+  ChapterView,
+  ChapterWriteInput,
+  ChapterWriteMode,
+  ChapterWriteResult,
+  FoundationGap,
+  FoundationGapKind,
+  FoundationImpactAssessment,
+  FoundationImpactMode,
+  FoundationImpactSeverity,
+  FoundationKey,
+  FoundationMeta,
+  FoundationPatch,
+  GenerateFoundationOptions,
+  InspectResult,
+  OutlineUpdate,
+  SessionEvent,
+  SessionUnsubscribe,
+  StartAutoWriteOptions,
+} from "../session/index.js";

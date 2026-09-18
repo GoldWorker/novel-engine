@@ -137,7 +137,7 @@ Event kinds: `started` | `step` | `paused` | `resumed` | `steered` | `stopped`.
 
 Commands (additive S5/S6 included):
 
-`inspectFoundation` | `getFoundation` | `getProgress` | `assertReadyToWrite` | `listArtifacts` | `exportSnapshot` | `importSnapshot` | `upsertFoundation` | `generateFoundation` | `assessFoundationImpact` | `applyFoundationChange` | `startAutoWrite` | `chapterGet` | `chapterSaveFinal` | `chapterWrite` | `close`
+`inspectFoundation` | `getFoundation` | `getProgress` | `assertReadyToWrite` | `listArtifacts` | `exportSnapshot` | `importSnapshot` | `upsertFoundation` | `generateFoundation` | `assessFoundationImpact` | `applyFoundationChange` | `startAutoWrite` | `pause` | `resume` | `steer` | `chapterGet` | `chapterSaveFinal` | `chapterWrite` | `chapterDelete` | `close`
 
 Notices: `result` | `event` | `error`.
 
@@ -163,7 +163,9 @@ Kit is composition + defaults. It does **not** change Session/Engine protocols.
 
 ## Busy / session lifecycle
 
-`startAutoWrite`, `chapter.write`, and `applyFoundationChange` share one session busy flag. A second call while one is in flight throws `SessionBusyError` (same-thread and over the Worker bridge). Worker-side busy means an in-flight `applyFoundationChange` / `startAutoWrite` blocks `chapter.write` across the bridge.
+`startAutoWrite`, `chapter.write`, `chapter.delete`, and `applyFoundationChange` share one session busy flag. A second call while one is in flight throws `SessionBusyError` (same-thread and over the Worker bridge). Worker-side busy means an in-flight `applyFoundationChange` / `startAutoWrite` / `chapter.delete` blocks `chapter.write` across the bridge.
+
+`pause` / `resume` / `steer` do **not** take the busy flag. They forward to the Engine instance held during `startAutoWrite` → `Engine.run`. When no Engine is running they return `{ status: "idle" }`. During `generateMissing` (before `Engine.run`) they are idle. Empty steer notes throw `EngineError`.
 
 Reads (`getFoundation`, `inspectFoundation`, `assessFoundationImpact`, `chapter.get`, …) do not take the busy flag. Session does **not** cache artifacts — every read is store read-through.
 

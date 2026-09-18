@@ -54,7 +54,7 @@ function template(key: string, planning: PlanningInfo): GapTemplate {
       return {
         path: PATHS.foundationAudit,
         requiredFor: "write",
-        hint: "基础设定未审查：调用 audit_foundation，或将 phase 设为 writing/complete。 / Foundation audit missing; writing or complete phase also satisfies this.",
+        hint: "基础设定未审查：仅剩本缺口时宿主可传 confirmAuditGap: true 继续；或调用 audit_foundation / 将 phase 设为 writing|complete。 / Foundation audit only: pass confirmAuditGap: true to proceed, or audit_foundation / phase writing|complete.",
       };
     default:
       return {
@@ -74,6 +74,12 @@ export function gapsFromMissing(missing: readonly string[], planning: PlanningIn
       path: row.path,
       requiredFor: row.requiredFor,
       hint: row.hint,
+      kind: key === "foundation_audit" ? "audit" : "artifact",
     };
   });
+}
+
+/** True when there is at least one gap and every gap is `foundation_audit`. */
+export function isAuditOnlyGaps(gaps: readonly { key: string }[]): boolean {
+  return gaps.length > 0 && gaps.every((gap) => gap.key === "foundation_audit");
 }

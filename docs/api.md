@@ -171,7 +171,7 @@ S1–S3 stay on a **same-thread** `NovelSession` (source of truth). **S4** is an
 | `ChapterRunner` / `ChapterView` / `ChapterWriteInput` / `ChapterWriteResult` / `ChapterWriteMode` / `CHAPTER_WRITE_MODES` | type / const | S3 ChapterRunner. Modes: `create` / `continue` / `rewrite` / `polish`. |
 | `FoundationIncompleteError` | class | `assertReadyToWrite` — `.gaps`. |
 | `SessionLlmRequiredError` / `FoundationGenerateError` | class | Missing `llm`; bad generate JSON / keys. |
-| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` / `applyFoundationChange` already in flight (including over the bridge). |
+| `SessionBusyError` | class | `startAutoWrite` / `chapter.write` / `chapter.delete` / `applyFoundationChange` already in flight (including over the bridge). |
 | `ChapterConflictError` / `ChapterRunnerError` | class | Chapter mode precondition; writer loop / `saveFinal` failure. |
 | `SessionClosedError` / `WorkspaceClosedError` / `BookNotFoundError` | class | Closed session/workspace; unknown `bookId`. |
 | `WORKSPACE_INDEX_PATH` | const | `"_index.json"`. |
@@ -207,7 +207,7 @@ Inference order, fingerprint skip, and audit reporting: [architecture](architect
 | `bookId` | Host-assigned id. |
 | `getFoundation()` | `{ book, premise, outline, layeredOutline, characters, worldRules, audit, progress }` — each field `null` when absent. |
 | `getProgress()` | `store.loadProgress()`. May be `null` (no `meta/progress.json` yet). |
-| `inspectFoundation({ prompt? })` | `{ meta, gaps, readyToWrite, planning }`. `prompt` (or `run_meta` / progress) picks the planning tier for the gap table. |
+| `inspectFoundation({ prompt? })` | `{ meta, gaps, readyToWrite, planning, auditOnly }`. `prompt` (or `run_meta` / progress) picks the planning tier for the gap table. |
 | `assertReadyToWrite({ prompt? })` | Throws `FoundationIncompleteError` with `gaps` when not ready. |
 | `listArtifacts(prefix?)` | `listStorePaths`. |
 | `exportSnapshot()` / `importSnapshot(bytes)` | Thin wrappers around the existing book-snapshot APIs. |
@@ -215,9 +215,10 @@ Inference order, fingerprint skip, and audit reporting: [architecture](architect
 | `generateFoundation({ prompt, keys, mode? })` | Structured one-shot `LlmPort.complete`; parse JSON from `text`; `upsertFoundation`. **Not** an Engine loop. |
 | `assessFoundationImpact(patch, { refineWithLlm? })` | S5: rules-first impact of a **proposed** patch. Optional LLM JSON refine. **Does not mutate**. |
 | `applyFoundationChange({ patch, confirmRewrite?, rewriteChapters?, … })` | S6: assess → confirm gate → upsert → optional sequential `chapter.write`. |
-| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | Optional upsert/generate, then either `{ status: "needs_foundation" }` or `createEngine(...).run`. Mutually exclusive with `chapter.write` / `applyFoundationChange` (`SessionBusyError`). |
-| `chapter` | S3 ChapterRunner: `get` / `saveFinal` / `write`. Same-thread; not an Engine book Route. |
-| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`. Returns unsubscribe. |
+| `startAutoWrite({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps? })` | Optional upsert/generate, then either `{ status: "needs_foundation", gaps, meta, auditOnly }` or `createEngine(...).run`. Mutually exclusive with `chapter.write` / `chapter.delete` / `applyFoundationChange` (`SessionBusyError`). |
+| `pause()` / `resume()` / `steer(note)` | Forward to the Engine held during `startAutoWrite`. `{ status: "ok" \| "idle" }`. `idle` when no Engine is running (no-op). Empty steer throws `EngineError`. Do **not** take the busy flag. |
+| `chapter` | S3 ChapterRunner: `get` / `saveFinal` / `write` / `delete`. Same-thread; not an Engine book Route. |
+| `subscribe(listener)` | `foundation_updated` / `auto_write_step` / `chapter_step` / `stopped` / `paused` / `resumed` / `steered`. Returns unsubscribe. |
 | `close()` | Further calls throw `SessionClosedError`. |
 
 **Not in S4:** `NovelWorkspace` over Worker (keep workspace on the UI thread, one book session per worker).
@@ -232,6 +233,7 @@ interface FoundationGap {
   path: string;         // logical store path
   requiredFor: string;  // "write" | "short" | "mid" | "long"
   hint: string;         // Chinese + short English
+  kind: "artifact" | "audit";
 }
 ```
 
@@ -260,12 +262,14 @@ Light shape checks, then `writeJson` / `writeText` on existing `PATHS`. **Omitte
 1. Optional `foundation` → `upsertFoundation`
 2. Optional `generateMissing: true` → `generateFoundation({ prompt, keys: missing, mode: "fill_missing" })`
 3. `inspectFoundation({ prompt })`
-4. If `requireConfirmGaps !== false` (default **true**) and `gaps.length > 0` → `{ status: "needs_foundation", gaps, meta }` **without** `Engine.run`
-5. If ready (or confirm disabled) → `createEngine({ store, llm }).run({ prompt, maxSteps })` → `{ status: "completed" | "stopped", result, meta }` (`completed` when `stoppedReason === "complete"`)
+4. If `requireConfirmGaps !== false` (default **true**) and `gaps.length > 0`:
+   - If leftover gaps are **only** `foundation_audit` **and** `confirmAuditGap: true` → proceed to Engine
+   - Else → `{ status: "needs_foundation", gaps, meta, auditOnly }` **without** `Engine.run`
+5. If ready (or confirm disabled / audit confirmed) → `createEngine({ store, llm }).run({ prompt, maxSteps })` → `{ status: "completed" | "stopped", result, meta }` (`completed` when `stoppedReason === "complete"`)
 
-`subscribe` emits `foundation_updated` after upsert, `auto_write_step` for each Engine `step`, `chapter_step` during `chapter.write`, and `stopped` for both needs-foundation and Engine outcomes.
+`subscribe` emits `foundation_updated` after upsert, `auto_write_step` for each Engine `step`, `paused` / `resumed` / `steered` from the held Engine, `chapter_step` during `chapter.write`, and `stopped` for both needs-foundation and Engine outcomes.
 
-`startAutoWrite`, `chapter.write`, and `applyFoundationChange` share a session busy flag: a second call while one is in flight throws `SessionBusyError`. See [architecture](architecture.md#busy--session-lifecycle).
+`startAutoWrite`, `chapter.write`, `chapter.delete`, and `applyFoundationChange` share a session busy flag: a second call while one is in flight throws `SessionBusyError`. `pause` / `resume` / `steer` do **not** take that flag (they only apply once `Engine.run` has started). See [architecture](architecture.md#busy--session-lifecycle).
 
 ### S1 — `NovelWorkspace`
 
@@ -290,6 +294,7 @@ Single-chapter create / continue / rewrite / polish on the **same-thread** sessi
 | `chapter.get(n)` | `{ chapter, plan, draft, final, summary }` from `drafts/NN.*`, `chapters/NN.md`, `summaries/NN.json`. `null` when none exist. |
 | `chapter.saveFinal(n, markdown)` | Writes `chapters/NN.md`, updates `progress.completedChapters` / checkpoint. No LLM. |
 | `chapter.write({ chapter, mode, instruction?, title?, force? })` | Dedicated writer loop over `LlmPort` + existing writer tools. Requires `llm`. |
+| `chapter.delete(n, { syncOutline? })` | Removes plan/draft/final/summary. Drops `n` from `completedChapters` / `pendingRewrites`; clamps `currentChapter`; `complete` → `writing` if a completed chapter was removed. `totalChapters` unchanged. `syncOutline` upserts outline files without that row (no renumbering; last remaining flat-outline row unsupported). Busy. Reviews (`reviews/*`) are left in place. |
 
 #### Modes
 
@@ -316,11 +321,11 @@ Same-thread `NovelSession` remains the implementation. `attachSessionWorker` con
 | --- | --- |
 | `attachSessionWorker(port, { createSession })` | Worker adapter. `createSession` injects `StorePort` + `LlmPort` and returns `createNovelSession(...)`. |
 | `createSessionClient(port, { bookId })` | Main-thread `NovelSession`. `bookId` must match the worker session. |
-| Protocol | `SESSION_PROTOCOL === 1`, `ns: "session"`. Commands: `inspectFoundation` / `getFoundation` / `getProgress` / `assertReadyToWrite` / `listArtifacts` / `exportSnapshot` / `importSnapshot` / `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `chapterGet` / `chapterSaveFinal` / `chapterWrite` / `close`. Notices: `result` / `event` / `error`. |
-| Busy | Worker-side `SessionBusyError` — `startAutoWrite` / `applyFoundationChange` in flight blocks `chapter.write` across the bridge. |
+| Protocol | `SESSION_PROTOCOL === 1`, `ns: "session"`. Commands: `inspectFoundation` / `getFoundation` / `getProgress` / `assertReadyToWrite` / `listArtifacts` / `exportSnapshot` / `importSnapshot` / `upsertFoundation` / `generateFoundation` / `assessFoundationImpact` / `applyFoundationChange` / `startAutoWrite` / `pause` / `resume` / `steer` / `chapterGet` / `chapterSaveFinal` / `chapterWrite` / `chapterDelete` / `close`. Notices: `result` / `event` / `error`. |
+| Busy | Worker-side `SessionBusyError` — `startAutoWrite` / `applyFoundationChange` / `chapter.delete` in flight blocks `chapter.write` across the bridge. `pause` / `resume` / `steer` are allowed during `startAutoWrite`. |
+| Events | Worker forwards `subscribe` events (`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped` / `paused` / `resumed` / `steered`). |
 | `generateFoundation` / S5–S6 | **Run in the worker** (the book `StorePort` lives there). |
 | `LlmPort` | `fetch` a host BFF. **Do not embed vendor API keys** in a public worker bundle. |
-| Events | Worker forwards `subscribe` events (`foundation_updated` / `auto_write_step` / `chapter_step` / `stopped`). |
 
 ### S5 — `assessFoundationImpact`
 
@@ -366,7 +371,7 @@ Host scenarios: [§7.2a](guide.md#scenario-session-impact-assess) · [§7.2b](gu
 | `FoundationIncompleteError` | `assertReadyToWrite` — `.gaps` is the inspect table. |
 | `SessionLlmRequiredError` | `generateFoundation` / Engine `startAutoWrite` / `chapter.write` / `applyFoundationChange({ rewriteChapters: true })` without `llm`. |
 | `FoundationGenerateError` | Bad `keys`, or `complete().text` is not a JSON object. |
-| `SessionBusyError` | `startAutoWrite`, `chapter.write`, or `applyFoundationChange` while another is in flight (same-thread and over the Worker bridge). |
+| `SessionBusyError` | `startAutoWrite`, `chapter.write`, `chapter.delete`, or `applyFoundationChange` while another is in flight (same-thread and over the Worker bridge). |
 | `ChapterConflictError` | Mode precondition failed (create on existing final, continue without draft, rewrite/polish without final). |
 | `ChapterRunnerError` | Invalid chapter number, empty `saveFinal`, or the writer loop produced no final. |
 | `SessionClosedError` | Method on a closed session (including after `switchTo`). |
@@ -394,8 +399,11 @@ Not part of `.`, `./worker`, `./llm`, or `./session`. Out-of-the-box façade: **
 | `KitWorkerError` | class | Missing `Worker`, bad custom store on worker, init timeout. |
 | `KitWorkspaceDisabledError` | class | Multi-book methods with `workspace: false` or a custom `StorePort`. |
 | `KitClosedError` | class | Calls after `dispose()`. |
+| Session types | type | Re-exported: `FoundationPatch`, `FoundationMeta`, `InspectResult`, `AutoWriteResult`, `FoundationImpactAssessment`, `ChapterView`, `ChapterWriteInput`, `ChapterWriteResult`, `SessionEvent`, `SessionUnsubscribe`, apply/assess options/results, `BookControlResult`, `ChapterDeleteResult`, … |
 
 `llm` is required for `runtime: "main"`, optional for worker (worker uses `llmEndpoint`; if both are passed, worker uses `llmEndpoint`). `bookId` default `"default"`. OPFS missing → `MemoryStore` when `fallbackToMemory` is true (default).
+
+Kit methods wrap Session 1:1 including `pauseBook` / `resumeBook` / `steerBook`, `deleteChapter`, `updateOutline` (upsert, no assess/confirm). `startBook` accepts `confirmAuditGap`.
 
 Sketch: [`examples/kit-host.ts`](../examples/kit-host.ts).
 

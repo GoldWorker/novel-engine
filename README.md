@@ -145,16 +145,15 @@ await kit.fillFoundation({
 // or: await kit.generateFoundation({ prompt, keys: ["book", "premise", "outline", "characters", "world_rules"] });
 
 let outcome = await kit.startBook({ prompt, generateMissing: true });
-if (outcome.status === "needs_foundation") {
-  // After artifacts exist, the leftover gap is usually `foundation_audit`.
-  // generateMissing cannot write the audit (Engine does, via audit_foundation).
-  // Default requireConfirmGaps: true stops before Engine.run — confirm, then continue:
-  outcome = await kit.startBook({ prompt, requireConfirmGaps: false });
+if (outcome.status === "needs_foundation" && outcome.auditOnly) {
+  // leftover is only foundation_audit — host confirms, Engine then writes the audit.
+  // Do not use requireConfirmGaps: false here: that also skips book/premise/outline gaps.
+  outcome = await kit.startBook({ prompt, confirmAuditGap: true });
 }
 // outcome.status === "completed" | "stopped" | still "needs_foundation" if other gaps remain
 ```
 
-`fillFoundation` is an upsert (no confirm gate). `startBook` with default `requireConfirmGaps: true` **will not** call `Engine.run` while any gap remains — including `foundation_audit` after a complete fill. That is intentional for a workbench UI.
+`fillFoundation` is an upsert (no confirm gate). `startBook` with default `requireConfirmGaps: true` **will not** call `Engine.run` while any gap remains — including `foundation_audit` after a complete fill. `inspect().auditOnly` / `needs_foundation.auditOnly` tell the host the leftover is audit-only. `generateMissing` cannot close `foundation_audit`.
 
 Scripted Engine mock through `phase=complete` (bypasses the Kit gap gate): [`examples/short-book.ts`](examples/short-book.ts) · [guide §1](docs/guide.md#scenario-short-book) · `npm run test:short`.
 
@@ -203,12 +202,12 @@ await kit.fillFoundation({
 });
 
 let outcome = await kit.startBook({ prompt, generateMissing: true });
-if (outcome.status === "needs_foundation") {
-  outcome = await kit.startBook({ prompt, requireConfirmGaps: false });
+if (outcome.status === "needs_foundation" && outcome.auditOnly) {
+  outcome = await kit.startBook({ prompt, confirmAuditGap: true });
 }
 ```
 
-Layered Engine mock (volume/arc, arc-end review → `expand_next_arc`): [`examples/layered-book.ts`](examples/layered-book.ts) · [guide §2](docs/guide.md#scenario-layered-book) · `npm run test:layered`. Kit does **not** expose Engine `pause` / `resume` / `steer` — `startBook` runs until complete, idle, pause inside the engine, or `maxSteps`.
+Layered Engine mock (volume/arc, arc-end review → `expand_next_arc`): [`examples/layered-book.ts`](examples/layered-book.ts) · [guide §2](docs/guide.md#scenario-layered-book) · `npm run test:layered`. Long runs: `pauseBook` / `resumeBook` / `steerBook(message)` forward to the Engine held during `startBook` (main and worker). Calling them when nothing is running returns `{ status: "idle" }` (no-op, not an exception).
 
 <a id="change-meta"></a>
 
@@ -244,7 +243,7 @@ Title / synopsis only (`book: { title, synopsis }`) is typically `meta_only` and
 
 ### Read foundation / progress
 
-Every read is **store read-through** (no Kit cache). There is no separate TOC API: outline lives on `getMeta()`, bodies on `getChapter(n)`.
+Every read is **store read-through** (no Kit cache). Outline lives on `getMeta()`. `updateOutline({ outline? , layeredOutline? })` upserts those keys via `fillFoundation` (whole-file replace, **no** assess/confirm gate). Bodies on `getChapter(n)`.
 
 ```ts
 const meta = await kit.getMeta();
@@ -267,17 +266,18 @@ const chapters = await kit.listArtifacts("chapters/"); // e.g. chapters/01.md
 
 <a id="chapters"></a>
 
-### Chapters (create / read / update — no delete)
+### Chapters (create / read / update / delete)
 
-Kit maps to Session ChapterRunner: `getChapter` / `writeChapter` / `saveChapter`. Chapter numbers start at **1**.
+Kit maps to Session ChapterRunner: `getChapter` / `writeChapter` / `saveChapter` / `deleteChapter`. Chapter numbers start at **1**.
 
-**There is no delete-chapter API** on Kit or Session. `StorePort.remove` exists for other paths (Session uses it to drop a stale `foundation_audit`); hosts cannot delete `chapters/NN.md` through this SDK.
+`deleteChapter(n, { syncOutline? })` removes `drafts/NN.plan.json`, `drafts/NN.draft.md`, `chapters/NN.md`, and `summaries/NN.json` (reviews are left in place). It drops `n` from `completedChapters` / `pendingRewrites`, clamps `currentChapter` if it pointed at `n`, and if `phase === "complete"` after removing a completed chapter, sets phase back to `writing`. `totalChapters` is unchanged. `syncOutline: true` upserts flat `outline` and/or `layeredOutline` without that row (no renumbering; deleting the last remaining flat-outline row is unsupported because upsert forbids an empty array). Requires `StorePort.remove` (MemoryStore / OpfsStore). Shares the busy flag with `startBook` / `writeChapter` / `applyFoundation`.
 
 | Intent | API | Notes |
 | --- | --- | --- |
 | Read | `getChapter(n)` | `{ chapter, plan, draft, final, summary }` or **`null`** if none exist |
 | LLM write | `writeChapter({ chapter, mode, instruction?, title?, force? })` | Dedicated writer loop — **not** `Engine.run`, **not** `pendingRewrites` |
 | Host markdown | `saveChapter(n, markdown)` | Writes the final, no LLM. Empty string throws |
+| Delete | `deleteChapter(n, { syncOutline? })` | Artifacts above; optional TOC upsert. Busy |
 
 `writeChapter` modes (`CHAPTER_WRITE_MODES`):
 
@@ -300,6 +300,7 @@ await kit.writeChapter({
 });
 
 await kit.saveChapter(1, "# 风暴之后\n\n……");
+await kit.deleteChapter(1, { syncOutline: true });
 ```
 
 `writeChapter` requires an `llm` (main) or a working `llmEndpoint` (worker). It shares the **busy** flag with `startBook` / `applyFoundation` (`SessionBusyError`). MockLlm for `writeChapter` must return **toolCalls** (`plan_chapter` / `draft_chapter` / `commit_chapter`); `generateFoundation` instead reads **JSON from `text`**. Guide: [§7.3](docs/guide.md#scenario-session-chapter).
@@ -322,6 +323,7 @@ Format: `novel-engine-book-snapshot` v1. Temp `.*.tmp` files are skipped. Direct
 ```ts
 const off = kit.subscribe((event) => {
   // "foundation_updated" | "auto_write_step" | "chapter_step" | "stopped"
+  // | "paused" | "resumed" | "steered"
   console.log(event.type);
 });
 off();           // unsubscribe
@@ -377,14 +379,14 @@ Real LLM adapters (`novel-engine/llm`) belong on a **BFF**, not in a public SPA:
 | `./llm` | `novel-engine/llm` | Optional fetch `LlmPort` adapters (OpenAI, Anthropic, DashScope) |
 
 ```ts
-import { NovelKit } from "novel-engine/kit";
+import { NovelKit, type FoundationPatch, type InspectResult } from "novel-engine/kit";
 import { createNovelSession, createNovelWorkspace } from "novel-engine/session";
 import { createEngine, MockLlm, exportBookSnapshot } from "novel-engine";
 import { attachEngineWorker } from "novel-engine/worker";
 import { createOpenAiLlm, createVendorLlm } from "novel-engine/llm";
 ```
 
-`./kit` does **not** re-export Session types (`FoundationPatch`, `InspectResult`, …). Infer them, or import types from `novel-engine/session`. Default `.` / `./worker` / `./llm` bundles do not pull in Kit or Session.
+`./kit` re-exports commonly needed Session types (`FoundationPatch`, `FoundationMeta`, `InspectResult`, `AutoWriteResult`, `SessionEvent`, apply/assess/chapter types, …). Runtime Kit surface is still `NovelKit` + kit errors/protocol. Default `.` / `./worker` / `./llm` bundles do not pull in Kit or Session.
 
 <a id="novelkit-create"></a>
 
@@ -420,16 +422,16 @@ Also exported from `./kit`: `defaultKitWorkerUrl()`, `attachKitWorker(port)`, `K
 
 Names wrap Session 1:1 (no second copy of the rules). After `dispose()`, every method throws `KitClosedError`.
 
-Busy flag (Session `SessionBusyError`): **`startBook`**, **`writeChapter`**, **`applyFoundation`** are mutually exclusive. `inspect` / `fillFoundation` / `generateFoundation` / `assessFoundation` / `getChapter` / `saveChapter` / reads / export are **not** on that flag.
+Busy flag (Session `SessionBusyError`): **`startBook`**, **`writeChapter`**, **`applyFoundation`**, **`deleteChapter`** are mutually exclusive. `pauseBook` / `resumeBook` / `steerBook` do **not** take the busy flag (they only apply while `startBook`'s Engine is running). `inspect` / `fillFoundation` / `generateFoundation` / `assessFoundation` / `getChapter` / `saveChapter` / `updateOutline` / reads / export are **not** on that flag.
 
 #### Inspect / ready
 
 | Method | Returns | Notes |
 | --- | --- | --- |
-| `inspect({ prompt? })` | `InspectResult` | `{ meta, gaps, readyToWrite, planning }`. `prompt` (else run_meta / progress / layered outline) picks the planning tier for the gap table |
+| `inspect({ prompt? })` | `InspectResult` | `{ meta, gaps, readyToWrite, planning, auditOnly }`. `prompt` (else run_meta / progress / layered outline) picks the planning tier for the gap table |
 | `assertReady({ prompt? })` | `void` | Throws `FoundationIncompleteError` (`.gaps`) when not ready |
 
-`readyToWrite` is true iff `foundationMissing` is empty. Mid/long with a valid `layered_outline.json` do **not** need flat `outline.json`. After book/premise/outline/characters/worldRules exist, the remaining gap is often **`foundation_audit`** until phase is `writing` or `complete` (Engine writes the audit).
+`readyToWrite` is true iff `foundationMissing` is empty. Mid/long with a valid `layered_outline.json` do **not** need flat `outline.json`. After book/premise/outline/characters/worldRules exist, the remaining gap is often **`foundation_audit`** (`auditOnly: true`) until phase is `writing` or `complete` (Engine writes the audit). Retry with `confirmAuditGap: true` — do not use `requireConfirmGaps: false` just to skip the audit.
 
 #### Foundation write
 
@@ -437,7 +439,8 @@ Busy flag (Session `SessionBusyError`): **`startBook`**, **`writeChapter`**, **`
 | --- | --- | --- | --- |
 | `fillFoundation(patch)` | `FoundationPatch` | `FoundationMeta` | Upsert. Omitted keys unchanged. Arrays **replace the whole file**. Invalidates `foundation_audit` when fingerprint files change. **No** assess / confirm |
 | `generateFoundation({ prompt, keys, mode? })` | keys: `book` \| `premise` \| `outline` \| `layered_outline` \| `characters` \| `world_rules` | `FoundationMeta` | One-shot LLM **JSON in `text`** (not toolCalls). `mode`: `"fill_missing"` (default) or `"overwrite"`. Requires `llm` / worker endpoint. **Not** an Engine loop, **not** busy-locked |
-| `startBook({ prompt, foundation?, generateMissing?, requireConfirmGaps?, maxSteps? })` | — | `AutoWriteResult` | Optional upsert/generate, then `{ status: "needs_foundation", gaps, meta }` **or** `Engine.run` → `{ status: "completed" \| "stopped", result, meta }`. Default `requireConfirmGaps: true`. Busy |
+| `startBook({ prompt, foundation?, generateMissing?, requireConfirmGaps?, confirmAuditGap?, maxSteps? })` | — | `AutoWriteResult` | Optional upsert/generate, then `{ status: "needs_foundation", gaps, meta, auditOnly }` **or** `Engine.run` → `{ status: "completed" \| "stopped", result, meta }`. Default `requireConfirmGaps: true`. `confirmAuditGap: true` proceeds only when leftover gaps are audit-only. Busy |
+| `pauseBook()` / `resumeBook()` / `steerBook(message)` | — | `{ status: "ok" \| "idle" }` | Forwards to the Engine held during `startBook`. `idle` when nothing is running (no-op). Empty steer note throws `EngineError`. Not busy-locked |
 
 `generateFoundation` keys are **snake_case** (`layered_outline`, `world_rules`); patch fields are **camelCase** (`layeredOutline`, `worldRules`). `BookMetadata` is `{ title, synopsis }` only.
 
@@ -459,8 +462,8 @@ Pitfalls: two-step apply for `rewrite_needed`; whole-file replace; `rewriteChapt
 | `getChapter(n)` | `ChapterView \| null` | `n` integer `> 0` |
 | `writeChapter(input)` | `ChapterWriteResult` `{ chapter, mode, view, turns }` | Modes above. Busy. Needs LLM |
 | `saveChapter(n, markdown)` | `void` | No LLM. Non-empty markdown required |
-
-**No `deleteChapter`.**
+| `deleteChapter(n, { syncOutline? })` | `ChapterDeleteResult` | Removes plan/draft/final/summary. Busy. `syncOutline` upserts TOC without that row |
+| `updateOutline({ outline?, layeredOutline? })` | `FoundationMeta` | Upsert via `fillFoundation` (no assess/confirm). At least one key required |
 
 #### Reads / snapshot / workspace / events
 
@@ -503,7 +506,7 @@ Use these when Kit defaults are wrong (custom `createStore`, scripted Engine loo
 | OPFS without Kit | `createOpfsStore` / `OpfsStore.open` | `novel-engine` |
 | Vendor fetch LLM | `createOpenAiLlm` / `createAnthropicLlm` / `createDashScopeLlm` / `createVendorLlm` | `novel-engine/llm` |
 
-Kit → Session names: `inspect` → `inspectFoundation`, `assertReady` → `assertReadyToWrite`, `fillFoundation` → `upsertFoundation`, `startBook` → `startAutoWrite`, `assessFoundation` → `assessFoundationImpact`, `applyFoundation` → `applyFoundationChange`, `getChapter`/`writeChapter`/`saveChapter` → `chapter.get`/`write`/`saveFinal`, `getMeta` → `getFoundation`, `exportBook`/`importBook` → `exportSnapshot`/`importSnapshot`, `dispose` → `close` (+ terminate worker).
+Kit → Session names: `inspect` → `inspectFoundation`, `assertReady` → `assertReadyToWrite`, `fillFoundation` → `upsertFoundation`, `startBook` → `startAutoWrite`, `pauseBook`/`resumeBook`/`steerBook` → `pause`/`resume`/`steer`, `assessFoundation` → `assessFoundationImpact`, `applyFoundation` → `applyFoundationChange`, `getChapter`/`writeChapter`/`saveChapter`/`deleteChapter` → `chapter.get`/`write`/`saveFinal`/`delete`, `updateOutline` → `upsertFoundation` (outline keys), `getMeta` → `getFoundation`, `exportBook`/`importBook` → `exportSnapshot`/`importSnapshot`, `dispose` → `close` (+ terminate worker).
 
 ---
 
@@ -514,7 +517,7 @@ Kit → Session names: `inspect` → `inspectFoundation`, `assertReady` → `ass
 - Arbiter full semantic scenes (`plan_start` is a keyword stub)
 - ChapterAdvanceGate review-mode UI
 - Node filesystem adapters — implement `StorePort` outside this library if you need `fs`
-- **Delete chapter**, Engine `pause`/`resume`/`steer` on Kit, mid-session LLM swap, `new NovelKit()`
+- Mid-session LLM swap, `new NovelKit()`
 
 ## Develop / test
 
